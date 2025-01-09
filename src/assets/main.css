@@ -1,0 +1,87 @@
+@import './base.css';
+
+/* 根容器樣式 */
+#app {
+  margin: 0 auto; /* 水平居中 */
+  display: flex; /* 使用 Flexbox 垂直布局 */
+  flex-direction: column; /* 垂直排列 Header 和 main */
+  height: 100vh; /* 占滿螢幕高度 */
+  font-weight: normal;
+  padding: 0; /* 移除內邊距，避免干擾 */
+  background-color: #f9f9f9; /* 統一背景顏色 */
+}
+
+/* Header 樣式 */
+header {
+  height: 60px; /* 固定 Header 高度 */
+  background-color: inherit; /* 繼承 #app 的背景顏色 */
+  color: black; /* 調整文字顏色，保證可讀性 */
+  display: flex; /* 垂直和水平居中內容 */
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0; /* 防止 Header 被壓縮 */
+}
+
+/* Main 區域樣式 */
+main {
+  flex-grow: 1; /* 填滿剩餘空間 */
+  display: flex; /* 使用 Flexbox 讓 Content 填滿 main */
+  flex-direction: column; /* 垂直方向布局 */
+  overflow: hidden; /* 防止滾動條干擾 */
+  background-color: inherit; /* 繼承 #app 的背景顏色 */
+}
+
+/* Content 樣式 */
+.content {
+  flex-grow: 1; /* 填滿 main 的高度 */
+  overflow-y: auto; /* 當內容過多時啟用滾動條 */
+  padding: 20px; /* 添加內邊距 */
+  border-top: 1px solid #ccc; /* 添加頂部邊框 */
+  background-color: inherit; /* 繼承 #app 的背景顏色 */
+}
+
+/* 超鏈接樣式 */
+a,
+.green {
+  text-decoration: none;
+  color: hsla(160, 100%, 37%, 1);
+  transition: 0.4s;
+  padding: 3px;
+}
+
+@media (hover: hover) {
+  a:hover {
+    background-color: hsla(160, 100%, 37%, 0.2);
+  }
+}
+
+/* 響應式設計 (大於 1024px 時) */
+@media (min-width: 1024px) {
+  body {
+    display: flex; /* 使用 Flexbox 將內容居中 */
+    place-items: center; /* 水平和垂直居中 */
+  }
+
+  #app {
+    display: flex; /* 使用 Flexbox */
+    flex-direction: column; /* 垂直排列 Header 和 main */
+    height: 100vh; /* 填滿整個屏幕高度 */
+    width: 100%;
+    padding: 0; /* 移除多餘內邊距 */
+    background-color: #0c0606; /* 保持背景顏色一致 */
+  }
+
+  main {
+    flex-grow: 1; /* 填滿剩餘高度 */
+    display: flex; /* 保持 Content 區域能夠填滿 */
+    flex-direction: column; /* 垂直方向布局 */
+    width: 100%; /* 確保內容區域寬度與父容器一致 */
+    background-color: inherit; /* 繼承 #app 的背景顏色 */
+  }
+
+  .content {
+    flex-grow: 1; /* 填滿 main 的剩餘高度 */
+    overflow-y: auto; /* 當內容超出可滾動 */
+    background-color: inherit; /* 繼承 #app 的背景顏色 */
+  }
+}
