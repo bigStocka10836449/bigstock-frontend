@@ -131,7 +131,7 @@ export default {
           if (maMapping[key]) {
             conditions.push({
               name: maMapping[key],
-              value: value.trend,
+              value: [value.trend],
               limit: value.days,
               operator: "notconcerned",
               type: "ma",
