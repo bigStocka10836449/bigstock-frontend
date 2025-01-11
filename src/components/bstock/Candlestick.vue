@@ -1,53 +1,55 @@
 <template>
   <div class="stock-query-container">
-    <div class="input-section">
-  <input type="text" v-model="stockCode" placeholder="請輸入股票代碼" />
-  <div>
-    <button @click="fetchStockData">查詢</button>
-    <button @click="fetchToken">獲取 Token</button>
-  </div>
-  <div class="tab-section">
-    <label>
-      <input type="radio" name="chartType" @click="showKLineChart" checked />
-      K線圖
-    </label>
-    <label>
-      <input type="radio" name="chartType" @click="showInfoChart" />
-      資券訊息
-    </label>
-  </div>
-  <div class="view-toggle" v-if="isKLineChart">
-    <label>
-      <input
-        type="radio"
-        value="day"
-        v-model="selectedView"
-        @change="selectView('day')"
-      />
-      日
-    </label>
-    <label>
-      <input
-        type="radio"
-        value="week"
-        v-model="selectedView"
-        @change="selectView('week')"
-      />
-      週
-    </label>
-    <label>
-      <input
-        type="radio"
-        value="month"
-        v-model="selectedView"
-        @change="selectView('month')"
-      />
-      月
-    </label>
-  </div>
-</div>
+    <!-- 查詢區域 -->
+    <div class="query-section">
+      <div class="stock-input">
+        <input type="text" v-model="stockCode" placeholder="請輸入股票代碼" />
+        <button @click="fetchStockData(stockCode)">查詢</button>
+      </div>
+    </div>
 
-    <div class="content-section">
+    <!-- 頁籤區域 -->
+    <div class="tab-section">
+      <div
+        :class="['tab', { active: isKLineChart }]"
+        @click="switchTab('kline')"
+      >
+        K線圖
+      </div>
+      <div
+        :class="['tab', { active: !isKLineChart }]"
+        @click="switchTab('info')"
+      >
+        資券訊息
+      </div>
+    </div>
+    <div class="view-toggle" v-if="!isKLineChart">
+    <stockInfoChart :outerStockCode="stockCode" />
+    </div>
+    <!-- 日K線、周K線、月K線選項 -->
+    <div class="view-toggle" v-if="isKLineChart">
+      <div
+        :class="['view-option', { selected: selectedView === 'day' }]"
+        @click="selectView('day')"
+      >
+        日K線
+      </div>
+      <div
+        :class="['view-option', { selected: selectedView === 'week' }]"
+        @click="selectView('week')"
+      >
+        周K線
+      </div>
+      <div
+        :class="['view-option', { selected: selectedView === 'month' }]"
+        @click="selectView('month')"
+      >
+        月K線
+      </div>
+    </div>
+
+    <!-- 表格與圖表區域 -->
+    <div v-if="isKLineChart" class="content-section">
       <!-- 表格容器 -->
       <div v-if="tableData.length" class="data-table-container">
         <table>
@@ -83,9 +85,13 @@
 <script>
 import * as echarts from 'echarts'
 import apiClient from '../../router/BstockAxios'
+import stockInfoChart from "./StockInfoChart.vue";
 
 export default {
   name: 'StockQueryPage',
+  components: {
+    stockInfoChart,
+  },
   data() {
     return {
       stockCode: '',
@@ -94,7 +100,7 @@ export default {
       stockData: [],
       tableData: [],
       selectedView: 'day', // 默認為日視角
-      isKLineChart: false, // 是否為 K 線圖模式，默認為 true
+      isKLineChart: true, // 是否為 K 線圖模式，默認為 true
     }
   },
   props: {
@@ -130,64 +136,139 @@ export default {
     },
   },
   methods: {
-    showKLineChart() {
-      this.isKLineChart = true
-    },
 
-    // 切換到 資券訊息 模式
-    showInfoChart() {
-      this.isKLineChart = false
+    switchTab(tab) {
+      this.isKLineChart = tab === "kline";
+    },
+    selectView(view) {
+      this.selectedView = view;
+      this.updateChartData();
+      console.log("切換到:", view);
     },
     fetchStockData(excuceStockCode = this.stockCode) {
       if (!excuceStockCode) {
         console.error('請輸入股票代碼')
         return
       }
+      console.log(excuceStockCode);
       // 格式化 startDate 和 endDate 成為 YYYY-MM-DDTHH:mm:ss.sssZ 格式
       const formattedStartDate = this.startDate ? new Date(this.startDate).toISOString() : ''
       const formattedEndDate = this.endDate ? new Date(this.endDate).toISOString() : ''
 
       const token = sessionStorage.getItem('authToken')
       apiClient
-        .post(
-          '/gateway/SingleStockPrice',
-          {
-            stockCode: excuceStockCode,
-            searchStartDate: formattedStartDate,
-            searchEndDate: formattedEndDate,
+      .post(
+        '/gateway/SingleStockPrice',
+        {
+          stockCode: excuceStockCode,
+          searchStartDate: formattedStartDate,
+          searchEndDate: formattedEndDate,
+        },
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
           },
-          {
-            headers: {
-              Authorization: `Bearer ${token}`,
-            },
-          },
-        )
-        .then((response) => {
-          const { singleStockDayPriceVos, singleStockWeekPriceVos, singleStockMonthPriceVos } =
-            response.data
+        }
+      )
+      .then((response) => {
+        const {
+          singleStockDayPriceVos,
+          singleStockWeekPriceVos,
+          singleStockMonthPriceVos,
+        } = response.data;
 
-          // 組織資料結構
-          this.stockData = {
-            day: singleStockDayPriceVos.sort(
-              (a, b) => new Date(a.tradingDate) - new Date(b.tradingDate),
-            ),
-            week: singleStockWeekPriceVos.sort(
-              (a, b) => new Date(a.tradingDate) - new Date(b.tradingDate),
-            ),
-            month: singleStockMonthPriceVos.sort(
-              (a, b) => new Date(a.tradingDate) - new Date(b.tradingDate),
-            ),
+        // 組織資料結構
+        this.stockData = {
+          day: singleStockDayPriceVos.sort(
+            (a, b) => new Date(a.tradingDate) - new Date(b.tradingDate)
+          ),
+          week: singleStockWeekPriceVos.sort(
+            (a, b) => new Date(a.tradingDate) - new Date(b.tradingDate)
+          ),
+          month: singleStockMonthPriceVos.sort(
+            (a, b) => new Date(a.tradingDate) - new Date(b.tradingDate)
+          ),
+        };
+
+        // 儲存到 sessionStorage
+        const cachedData = JSON.parse(sessionStorage.getItem('cachedStockData')) || {};
+        cachedData[this.stockCode] = {
+          stockData: this.stockData,
+        };
+        sessionStorage.setItem('cachedStockData', JSON.stringify(cachedData));
+
+        // 更新圖表
+        this.updateChartData();
+      })
+      .catch((error) => {
+        if (error.response && error.response.status === 401) {
+          console.warn('Token 無效或過期，正在嘗試重新獲取 Token...');
+
+          // 獲取新 Token
+          this.fetchToken()
+            .then(() => {
+               // 從 sessionStorage 獲取新的 Token
+              const newToken = sessionStorage.getItem('authToken');
+              if (newToken) {
+                console.log('重新嘗試請求股票數據... stockCode :'+ excuceStockCode );
+                // 重新執行請求
+                return apiClient.post(
+                  '/gateway/SingleStockPrice',
+                  {
+                    stockCode: excuceStockCode,
+                    searchStartDate: formattedStartDate,
+                    searchEndDate: formattedEndDate,
+                  },
+                  {
+                    headers: {
+                      Authorization: `Bearer ${newToken}`,
+                    },
+                  }
+                );
+              } else {
+                throw new Error('無法獲取新 Token');
+              }
+            })
+            .then((response) => {
+              const {
+                singleStockDayPriceVos,
+                singleStockWeekPriceVos,
+                singleStockMonthPriceVos,
+              } = response.data;
+
+              // 組織資料結構
+              this.stockData = {
+                day: singleStockDayPriceVos.sort(
+                  (a, b) => new Date(a.tradingDate) - new Date(b.tradingDate)
+                ),
+                week: singleStockWeekPriceVos.sort(
+                  (a, b) => new Date(a.tradingDate) - new Date(b.tradingDate)
+                ),
+                month: singleStockMonthPriceVos.sort(
+                  (a, b) => new Date(a.tradingDate) - new Date(b.tradingDate)
+                ),
+              };
+
+              // 儲存到 sessionStorage
+              const cachedData =
+                JSON.parse(sessionStorage.getItem('cachedStockData')) || {};
+              cachedData[this.stockCode] = {
+                stockData: this.stockData,
+              };
+              sessionStorage.setItem(
+                'cachedStockData',
+                JSON.stringify(cachedData)
+              );
+
+                // 更新圖表
+                this.updateChartData();
+              })
+              .catch((retryError) => {
+                console.error('重新請求失敗:', retryError);
+              });
+          } else {
+            console.error('請求股票數據失敗:', error);
           }
-
-          // 儲存到 sessionStorage
-          const cachedData = JSON.parse(sessionStorage.getItem('cachedStockData')) || {}
-          cachedData[this.stockCode] = {
-            stockData: this.stockData,
-          }
-          sessionStorage.setItem('cachedStockData', JSON.stringify(cachedData))
-
-          // 更新圖表
-          this.updateChartData()
         })
     },
     fetchToken() {
@@ -256,11 +337,6 @@ export default {
 
       // 更新表格
       this.tableData = selectedData
-    },
-
-    selectView(view) {
-      this.selectedView = view // 更新當前視角
-      this.updateChartData() // 根據新的視角更新數據
     },
 
     renderChart(dates, prices, volumes,ma5, ma10, ma20, ma60) {
@@ -534,113 +610,98 @@ export default {
 </script>
 
 <style scoped>
-.stock-query-container {
-  width: 70%;
-  margin: 0 auto;
-  text-align: center;
-}
-.input-section {
-  margin-bottom: 20px;
+/* 查詢區域樣式 */
+.query-section {
   display: flex;
-  flex-direction: column;
+  justify-content: space-between;
   align-items: center;
-  gap: 15px;
-}
-input[type='text'],
-input[type='date'] {
-  padding: 12px 16px;
-  font-size: 16px;
-  border: 2px solid #e0e0e0;
-  border-radius: 8px;
-  box-shadow: 2px 2px 8px rgba(0, 0, 0, 0.1);
-  outline: none;
-  background: linear-gradient(145deg, #ffffff, #f4f4f4);
-  transition: all 0.3s ease;
-  width: 250px;
-  font-family: 'Georgia', serif; /* 文藝字體 */
+  margin-bottom: 15px;
 }
 
-input[type='text']:focus,
-input[type='date']:focus {
-  border-color: #a9c9ff;
-  box-shadow: 0px 0px 8px rgba(169, 201, 255, 0.8);
-  background: linear-gradient(145deg, #f4f4f4, #ffffff);
+.stock-input {
+  display: flex;
+  align-items: center;
+  gap: 10px;
 }
 
-button {
-  padding: 12px 20px;
-  font-size: 16px;
-  font-weight: bold;
-  color: #ffffff;
+.stock-input input {
+  padding: 8px;
+  border: 2px solid #4caf50;
+  border-radius: 5px;
+  font-size: 14px;
+}
+
+.stock-input button {
+  padding: 8px 16px;
+  background-color: #4caf50;
+  color: white;
   border: none;
-  border-radius: 8px;
-  background: linear-gradient(145deg, #85a9ff, #567bcf);
-  box-shadow: 2px 2px 8px rgba(0, 0, 0, 0.2);
-  cursor: pointer;
-  transition: all 0.3s ease;
-}
-
-button:hover {
-  background: linear-gradient(145deg, #567bcf, #85a9ff);
-  box-shadow: 4px 4px 12px rgba(0, 0, 0, 0.3);
-  transform: scale(1.05);
-}
-
-button:active {
-  background: linear-gradient(145deg, #456ab8, #567bcf);
-  box-shadow: inset 2px 2px 6px rgba(0, 0, 0, 0.2);
-}
-
-.tab-section label {
-  font-size: 16px;
-  color: #333;
-  font-family: 'Georgia', serif;
-  margin-right: 20px;
-  display: flex;
-  align-items: center;
-  gap: 5px;
-}
-
-input[type='radio'] {
-  appearance: none;
-  width: 16px;
-  height: 16px;
-  border: 2px solid #a9c9ff;
-  border-radius: 50%;
-  outline: none;
-  background: #f4f4f4;
-  box-shadow: 1px 1px 4px rgba(0, 0, 0, 0.1);
-  transition: all 0.3s ease;
+  border-radius: 5px;
   cursor: pointer;
 }
 
-input[type='radio']:checked {
-  background: #85a9ff;
-  border-color: #567bcf;
-  box-shadow: 0px 0px 6px rgba(169, 201, 255, 0.8);
+.token-button {
+  padding: 8px 16px;
+  background-color: #66bb6a;
+  color: white;
+  border: none;
+  border-radius: 5px;
+  cursor: pointer;
 }
 
-
-.chart-container {
-  width: 1200px;
-  height: 600px;
-  margin: 0 auto;
-}
-
-.content-section {
+/* 頁籤區域樣式 */
+.tab-section {
   display: flex;
-  flex-direction: column;
-  align-items: center;
+  margin-bottom: 15px;
+  gap: 10px;
 }
 
+.tab {
+  flex: 1;
+  text-align: center;
+  padding: 10px;
+  cursor: pointer;
+  background-color: #383838;
+  color: white;
+  border-radius: 5px;
+  transition: background-color 0.3s;
+}
+
+.tab.active {
+  background-color: #4caf50;
+  color: white;
+}
+
+/* 日K線、周K線、月K線選項樣式 */
+.view-toggle {
+  display: flex;
+  justify-content: center;
+  gap: 15px;
+  margin-bottom: 15px;
+}
+
+.view-option {
+  padding: 8px 12px;
+  cursor: pointer;
+  background-color: #383838;
+  color: white;
+  border-radius: 5px;
+  transition: background-color 0.3s;
+}
+
+.view-option.selected {
+  background-color: #4caf50;
+}
+
+/* 表格容器樣式 */
 .data-table-container {
-  margin: 10px 0;
-  width: 80%;
+  margin-bottom: 15px;
 }
 
 table {
   width: 100%;
   border-collapse: collapse;
+  margin-top: 10px;
 }
 
 th,
@@ -651,8 +712,12 @@ td {
 }
 
 th {
-  background-color: #f4f4f4;
-  font-weight: bold;
+  background-color: #4caf50;
+  color: white;
 }
 
+.chart-container {
+  height: 400px;
+  background-color: #2c2c2c;
+}
 </style>
