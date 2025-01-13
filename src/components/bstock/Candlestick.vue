@@ -49,7 +49,7 @@
     </div>
 
     <!-- 表格與圖表區域 -->
-    <div v-if="isKLineChart" class="content-section">
+    <div v-show="isKLineChart" class="content-section">
       <!-- 表格容器 -->
       <div v-if="tableData.length" class="data-table-container">
         <table>

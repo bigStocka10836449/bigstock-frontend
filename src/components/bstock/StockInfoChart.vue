@@ -23,7 +23,7 @@
   
   <script>
   import * as echarts from "echarts";
-  
+  import apiClient from '../../router/BstockAxios';
   export default {
     name: "StockInfoChart",
     props: {
@@ -37,6 +37,7 @@
         chart: null,
         activeTab: "融資", // 預設顯示融資
         stockCode: '',
+        stockData: [],
       };
     },
     watch: {
@@ -53,51 +54,31 @@
       this.initChart();
     },
     methods: {
-      setActiveTab(tab) {
-        this.activeTab = tab;
-      },
-      initChart() {
-        this.chart = echarts.init(this.$refs.stockInfoChart);
-        this.fetchStockData();
-      },
-      fetchStockData(excuceStockCode = this.stockCode) {
 
+      renderChart(dates, marginPurchaseList, marginSalesList, cashRedemptionList, shortSalesList, shortConveringList, stockRedemptionList) {
 
-        if (!excuceStockCode) {
-            console.error('請輸入股票代碼')
-            return
+        let values = [];
+
+        switch (this.activeTab) {
+            case '融資':
+                // 融資情況下計算 values
+                values = dates.map((_, index) => 
+                   marginPurchaseList[index] - marginSalesList[index] - cashRedemptionList[index]
+                );
+                break;
+
+            case '融券':
+                // 融券情況下計算 values
+                values = dates.map((_, index) => 
+                  shortSalesList[index] - shortConveringList[index] - stockRedemptionList[index]
+                );
+                break;
+
+            default:
+                console.error('Unknown activeTab value:', this.activeTab);
+                break;
         }
-        console.log(excuceStockCode);
 
-        const token = sessionStorage.getItem('authToken')
-        apiClient
-        .get(
-            '/biz/stockCodeFilterType/' + excuceStockCode,
-            {
-            headers: {
-                Authorization: `Bearer ${token}`,
-            },
-            }
-        ) .then((response) => {
-            const {
-            tradingDay,
-            stockCode,
-            marginPurchaseBalancePreviousDay,
-            marginPurchase,
-            marginSales,
-            cashRedemption,
-            marginPurchaseBalance,
-            marginPurchaseQuota,
-            shortSaleBalancePreviousDay,
-            shortSale,
-            shortConvering,
-            stockRedemption,
-            shortSaleBalance,
-            shortSaleQuota,
-            offsetting,
-            } = response.data;
-            console.log('成功回應:', response.data);
-        }) 
         const option = {
           tooltip: {
             trigger: "axis",
@@ -137,7 +118,7 @@
             {
               name: this.activeTab,
               type: "bar",
-              data: this.activeTab,
+              data: values,
               itemStyle: {
                 color: (params) => {
                   return params.value >= 0 ? "#f44336" : "#4caf50"; // 紅色為正數，綠色為負數
@@ -149,6 +130,57 @@
         };
   
         this.chart.setOption(option);
+
+       }, 
+      setActiveTab(tab) {
+        this.activeTab = tab;
+      },
+      initChart() {
+        this.chart = echarts.init(this.$refs.stockInfoChart);
+        this.fetchStockData();
+      },
+      fetchStockData(excuceStockCode = this.stockCode) {
+
+
+        if (!excuceStockCode) {
+            console.error('請輸入股票代碼')
+            return
+        }
+        console.log(excuceStockCode);
+
+        const token = sessionStorage.getItem('authToken')
+        apiClient
+        .get(
+            '/biz/stockCodeMarginShortInfo/' + excuceStockCode,
+            {
+            headers: {
+                Authorization: `Bearer ${token}`,
+            },
+            }
+        ) .then((response) => {
+              // 儲存到 sessionStorage
+            this.stockData = response.data;
+            const cachedData =
+              JSON.parse(sessionStorage.getItem('cachedStockCodeMarginShortInfo')) || {};
+            cachedData[this.stockCode] = {
+              stockData: this.stockData,
+            };
+            sessionStorage.setItem(
+                'cachedStockCodeMarginShortInfo',
+                JSON.stringify(cachedData)
+              );
+            console.log('成功回應:', response.data);
+
+            const dates = this.stockData.map((item) => item.tradingDay);
+            const marginPurchaseList = this.stockData.map((item) => item.marginPurchase);
+            const marginSalesList = this.stockData.map((item) => item.marginSales);
+            const cashRedemptionList = this.stockData.map((item) => item.cashRedemption);
+            const shortSaleList = this.stockData.map((item) => item.shortSale);
+            const shortConveringList = this.stockData.map((item) => item.shortConvering);
+            const stockRedemptionList = this.stockData.map((item) => item.stockRedemption);
+            this.renderChart(dates, marginPurchaseList, marginSalesList, cashRedemptionList, shortSaleList, shortConveringList, stockRedemptionList);
+
+        }) 
       },
       resizeChart() {
         if (this.chart) {
