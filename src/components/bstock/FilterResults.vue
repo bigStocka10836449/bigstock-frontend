@@ -27,7 +27,7 @@
 
 <script>
 export default {
-  name: "FilterResults",
+  name: 'FilterResults',
   props: {
     results: {
       type: Array,
@@ -41,25 +41,26 @@ export default {
   data() {
     return {
       isExpanded: false, // 控制展開/摺疊
-    };
+    }
   },
   methods: {
     toggleExpand() {
-      this.isExpanded = !this.isExpanded;
+      this.isExpanded = !this.isExpanded
     },
     selectStock(stockCode) {
       // 向父組件發送事件，並傳遞選中的 stockCode
-      this.$emit("select-stock", stockCode);
+      this.$emit('select-stock', stockCode)
     },
     addPressedEffect(event) {
-      event.target.classList.add("pressed");
+      event.target.classList.add('pressed')
     },
     removePressedEffect(event) {
-      event.target.classList.remove("pressed");
+      event.target.classList.remove('pressed')
     },
   },
-};
+}
 </script>
+select-stock
 
 <style scoped>
 .filter-results {
@@ -123,7 +124,9 @@ export default {
   margin: 5px 0;
   border-radius: 5px;
   background-color: #383838;
-  transition: background-color 0.2s, transform 0.1s;
+  transition:
+    background-color 0.2s,
+    transform 0.1s;
   color: #fff;
 }
 .result-item:hover {
@@ -137,7 +140,9 @@ export default {
 /* Slide animation */
 .slide-enter-active,
 .slide-leave-active {
-  transition: max-height 0.3s ease, opacity 0.3s ease;
+  transition:
+    max-height 0.3s ease,
+    opacity 0.3s ease;
 }
 .slide-enter-from,
 .slide-leave-to {

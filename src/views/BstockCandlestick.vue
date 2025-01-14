@@ -1,183 +1,197 @@
 <template>
   <div class="container">
     <!-- Sidebar -->
-    <Sidebar
-      @apply-filters="handleFilters"
-    />
+    <Sidebar @apply-filters="handleFilters" />
+
     <!-- Filter Results -->
     <FilterResults
       :results="results"
       :shouldShow="shouldShowResults"
-      @select-stock = "handleSelectStock"
+      @select-stock="handleSelectStock"
     />
+
     <!-- Main Content -->
     <div class="content space-theme">
-      <Candlestick :outerStockCode="selectedStockCode" />
+      <!-- 查詢區域 -->
+      <div class="query-section">
+        <div class="stock-input">
+          <input type="text" v-model="selectedStockCode" placeholder="請輸入股票代碼" />
+          <button @click="handleSelectStock(selectedStockCode)">查詢</button>
+        </div>
+      </div>
+      <!-- 頁籤區域 -->
+      <div class="tab-section">
+        <div :class="['tab', { active: isKLineChart }]" @click="switchTab('kline')">K線圖</div>
+        <div :class="['tab', { active: !isKLineChart }]" @click="switchTab('info')">資券訊息</div>
+      </div>
+      <Candlestick
+        :stockData="stockData"
+        :selectedStockCode="selectedStockCode"
+        :isKLineChart="isKLineChart"
+      />
+      <StockInfoChart
+        v-show="!isKLineChart"
+        :marginShortData="stockMarginShortData"
+        :selectedStockCode="selectedStockCode"
+      />
     </div>
   </div>
 </template>
 
 <script>
-import Candlestick from "../components/bstock/Candlestick.vue";
-import FilterResults from "../components/bstock/FilterResults.vue";
-import Sidebar from "../components/bstock/Sidebar.vue";
-import apiClient from '../router/BstockAxios';
+import Candlestick from '../components/bstock/Candlestick.vue'
+import StockInfoChart from '../components/bstock/StockInfoChart.vue'
+import FilterResults from '../components/bstock/FilterResults.vue'
+import Sidebar from '../components/bstock/Sidebar.vue'
+import apiClient from '../router/BstockAxios'
 
 export default {
-  name: "BstockCandlestick",
-  components: { Sidebar, FilterResults, Candlestick },
+  name: 'BstockCandlestick',
+  components: { Sidebar, FilterResults, Candlestick, StockInfoChart },
+
   data() {
     return {
-      filters: null, // 存儲篩選條件
-      results: null, // 存儲查詢結果
+      filters: null, // 儲存篩選條件
+      results: null, // 查詢結果
       shouldShowResults: false, // 控制 FilterResults 展開
-      isCollapsed: false, // 控制側邊欄的伸展/摺疊
-      isFilterResultsExpanded: false, // FilterResults 展開/摺疊狀態
       selectedStockCode: null, // 選中的股票代碼
-    };
+      stockData: null, // 股票價格數據
+      stockMarginShortData: null, // 資券數據
+      isKLineChart: true,
+    }
   },
   methods: {
-    toggleSidebar() {
-      this.isCollapsed = !this.isCollapsed; // 切換側邊欄狀態
+    switchTab(tab) {
+      this.isKLineChart = tab === 'kline'
     },
-    toggleFilterResults() {
-      // 手動摺疊/展開 FilterResults
-      this.isFilterResultsExpanded = !this.isFilterResultsExpanded;
-    },
-
-
-    handleSelectStock(stockCode) {
-      // 更新選中的股票代碼
-      console.log("選中的股票代碼:", stockCode);
-      this.selectedStockCode = stockCode;
-    },
-
-    async handleFilters(filters) {
-      // 儲存過濾條件
-      this.filters = filters;
-
-      // 假設執行查詢
-      const queryResults = await this.executeQuery(filters);
-
-      // 更新結果與狀態
-      this.results = queryResults;
-      this.shouldShowResults = queryResults && queryResults.length > 0;
-      this.isFilterResultsExpanded = true; // 自動展開
-    },
-
-
-     async fetchToken() {
+    async fetchData(apiEndpoint, payload, method) {
+      const token = sessionStorage.getItem('authToken')
       try {
-        const response = await apiClient.get('/auth/tempToken');
-        const token = response.data.token;
-        if (token) {
-          console.log('新 Token 獲取成功:', token);
-          sessionStorage.setItem('authToken', token);
+        let response = []
+        if (['POST', 'PUT', 'PATCH'].includes(method.toUpperCase())) {
+          response = await apiClient.post(apiEndpoint, payload, {
+            headers: { Authorization: `Bearer ${token}` },
+          })
         } else {
-          console.error('未獲取到有效的 Token:', response.data);
+          response = await apiClient.get(apiEndpoint, {
+            headers: { Authorization: `Bearer ${token}` },
+          })
         }
+        return response.data
       } catch (error) {
-        console.error('獲取 Token 失敗:', error);
+        if (error.response?.status === 401) {
+          console.warn('Token 無效或過期，嘗試重新獲取 Token...')
+          await this.fetchToken()
+          const newToken = sessionStorage.getItem('authToken')
+          if (newToken) {
+            return await this.fetchData(apiEndpoint, payload, method)
+          }
+        }
+        console.error('API 請求失敗:', error)
       }
     },
 
-    async executeQuery(filters) {
-      console.log("執行查詢條件：", filters);
-      let localResult = null; // 用於存儲最終結果
+    async fetchToken() {
+      try {
+        const response = await apiClient.get('/auth/tempToken')
+        const token = response.data.token
+        if (token) {
+          console.log('新 Token 獲取成功:', token)
+          sessionStorage.setItem('authToken', token)
+        } else {
+          console.error('未獲取到有效的 Token:', response.data)
+        }
+      } catch (error) {
+        console.error('獲取 Token 失敗:', error)
+      }
+    },
 
-      // 构建 conditions
-      const conditions = [];
+    async fetchStockData(stockCode) {
+      const payload = { stockCode }
+      const data = await this.fetchData('/gateway/SingleStockPrice', payload, 'POST')
+      this.stockData = data
+    },
+
+    async fetchMarginShortData(stockCode) {
+      const data = await this.fetchData(`/api/biz/stockCodeMarginShortInfo/${stockCode}`, {}, 'GET')
+      this.stockMarginShortData = data
+    },
+
+    async handleFilters(filters) {
+      this.filters = filters
+      const conditions = this.constructConditions(filters)
+      const payload = { conditions }
+
+      const data = await this.fetchData('/gateway/StockCodeByFilter', payload, 'POST')
+      this.results = data
+      this.shouldShowResults = data && data.length > 0
+    },
+
+    handleSelectStock(stockCode) {
+      this.selectedStockCode = stockCode
+      this.fetchStockData(stockCode)
+      this.fetchMarginShortData(stockCode)
+    },
+
+    constructConditions(filters) {
+      const conditions = []
 
       if (filters.kd) {
         conditions.push({
-          name: "kd",
+          name: 'kd',
           value: [filters.kd],
           limit: filters.kdDays.toString(),
-          operator: "notconcerned",
-          type: "kd",
-        });
+          operator: 'notconcerned',
+          type: 'kd',
+        })
       }
 
       if (filters.priceRise) {
         conditions.push({
-          name: "priceRise",
+          name: 'priceRise',
           value: [filters.risePercentage.toString()],
           limit: filters.riseDays,
-          operator: "notconcerned",
-          type: "change",
-        });
+          operator: 'notconcerned',
+          type: 'change',
+        })
       }
 
       if (filters.limitUp) {
         conditions.push({
-          name: "limitUp",
-          value: ["notconcerned"],
-          operator: "notconcerned",
-          type: "limitUp",
-        });
+          name: 'limitUp',
+          value: ['notconcerned'],
+          operator: 'notconcerned',
+          type: 'limitUp',
+        })
       }
 
       Object.entries(filters.movingAverage).forEach(([key, value]) => {
         if (value.trend) {
           const maMapping = {
-            "5日均線": "five_days_slope",
-            "10日均線": "ten_days_slope",
-            "20日均線": "twenty_days_slope",
-            "60日均線": "sixty_days_slope",
-            "120日均線": "one_twenty_days_slope",
-            "240日均線": "two_fourty_days_slope",
-          };
+            '5日均線': 'five_days_slope',
+            '10日均線': 'ten_days_slope',
+            '20日均線': 'twenty_days_slope',
+            '60日均線': 'sixty_days_slope',
+            '120日均線': 'one_twenty_days_slope',
+            '240日均線': 'two_fourty_days_slope',
+          }
 
           if (maMapping[key]) {
             conditions.push({
               name: maMapping[key],
               value: [value.trend],
               limit: value.days,
-              operator: "notconcerned",
-              type: "ma",
-            });
+              operator: 'notconcerned',
+              type: 'ma',
+            })
           }
         }
-      });
+      })
 
-      const payload = { conditions };
-      console.log("构建的 payload：", payload);
-
-      const token = sessionStorage.getItem("authToken");
-      try {
-        const response = await apiClient.post("/gateway/StockCodeByFilter", payload, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-
-        localResult = response.data;
-        this.shouldShowResults = localResult && localResult.length > 0;
-      } catch (error) {
-        if (error.response && error.response.status === 401) {
-          console.warn("Token 無效或過期，嘗試重新獲取 Token...");
-          await this.fetchToken();
-          const newToken = sessionStorage.getItem("authToken");
-
-          if (newToken) {
-            console.log("重新嘗試請求股票數據...");
-            try {
-              const retryResponse = await apiClient.post("/gateway/StockCodeByFilter", payload, {
-                headers: { Authorization: `Bearer ${newToken}` },
-              });
-
-              localResult = retryResponse.data;
-            } catch (retryError) {
-              console.error("重新請求失敗:", retryError);
-            }
-          }
-        } else {
-          console.error("請求股票數據失敗:", error);
-        }
-      }
-
-      return localResult;
+      return conditions
     },
   },
-};
+}
 </script>
 
 <style scoped>
@@ -201,7 +215,9 @@ export default {
   border-bottom-right-radius: 20px;
   position: relative;
   overflow: visible; /* 確保內容不被裁切 */
-  transition: width 0.3s ease, box-shadow 0.3s ease; /* 添加陰影過渡效果 */
+  transition:
+    width 0.3s ease,
+    box-shadow 0.3s ease; /* 添加陰影過渡效果 */
 }
 
 .sidebar.collapsed {
@@ -226,7 +242,9 @@ export default {
   justify-content: center;
   align-items: center;
   box-shadow: 0 4px 15px rgba(0, 0, 0, 0.5); /* 更深的陰影 */
-  transition: transform 0.3s ease, box-shadow 0.3s ease; /* 過渡效果 */
+  transition:
+    transform 0.3s ease,
+    box-shadow 0.3s ease; /* 過渡效果 */
   z-index: 10; /* 確保按鈕不被其他元素遮蓋 */
 }
 
@@ -269,7 +287,6 @@ export default {
   pointer-events: none; /* 禁止攔截事件 */
 }
 
-
 /* 流星 */
 .space-theme::after {
   content: '';
@@ -285,5 +302,56 @@ export default {
   pointer-events: none; /* 禁止攔截事件 */
 }
 
+/* 查詢區域樣式 */
+.query-section {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 15px;
+}
 
+.stock-input {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.stock-input input {
+  padding: 8px;
+  border: 2px solid #4caf50;
+  border-radius: 5px;
+  font-size: 14px;
+}
+
+.stock-input button {
+  padding: 8px 16px;
+  background-color: #4caf50;
+  color: white;
+  border: none;
+  border-radius: 5px;
+  cursor: pointer;
+}
+
+/* 頁籤區域樣式 */
+.tab-section {
+  display: flex;
+  margin-bottom: 15px;
+  gap: 10px;
+}
+
+.tab {
+  flex: 1;
+  text-align: center;
+  padding: 10px;
+  cursor: pointer;
+  background-color: #383838;
+  color: white;
+  border-radius: 5px;
+  transition: background-color 0.3s;
+}
+
+.tab.active {
+  background-color: #4caf50;
+  color: white;
+}
 </style>
