@@ -120,7 +120,7 @@ export default {
     async handleFilters(filters) {
       this.filters = filters
       const conditions = this.constructConditions(filters)
-      const payload = { conditions }
+      const payload = conditions; 
 
       const data = await this.fetchData('/gateway/StockCodeByFilter', payload, 'POST')
       this.results = data
@@ -134,61 +134,70 @@ export default {
     },
 
     constructConditions(filters) {
-      const conditions = []
-
-      if (filters.kd) {
-        conditions.push({
-          name: 'kd',
-          value: [filters.kd],
-          limit: filters.kdDays.toString(),
-          operator: 'notconcerned',
-          type: 'kd',
-        })
+      const aspects = ['daily', 'weekly', 'monthly']
+      const maMapping = {
+        '5日均線': 'five_days_slope',
+        '10日均線': 'ten_days_slope',
+        '20日均線': 'twenty_days_slope',
+        '60日均線': 'sixty_days_slope',
+        '120日均線': 'one_twenty_days_slope',
+        '240日均線': 'two_fourty_days_slope',
       }
 
-      if (filters.priceRise) {
-        conditions.push({
-          name: 'priceRise',
-          value: [filters.risePercentage.toString()],
-          limit: filters.riseDays,
-          operator: 'notconcerned',
-          type: 'change',
-        })
-      }
+      return aspects
+        .map((aspect) => {
+          const aspectFilters = filters[aspect]
+          const movingAverageFilters = filters.movingAverage[aspect] || {}
 
-      if (filters.limitUp) {
-        conditions.push({
-          name: 'limitUp',
-          value: ['notconcerned'],
-          operator: 'notconcerned',
-          type: 'limitUp',
-        })
-      }
+          const conditions = []
 
-      Object.entries(filters.movingAverage).forEach(([key, value]) => {
-        if (value.trend) {
-          const maMapping = {
-            '5日均線': 'five_days_slope',
-            '10日均線': 'ten_days_slope',
-            '20日均線': 'twenty_days_slope',
-            '60日均線': 'sixty_days_slope',
-            '120日均線': 'one_twenty_days_slope',
-            '240日均線': 'two_fourty_days_slope',
-          }
-
-          if (maMapping[key]) {
+          // Handle KD
+          if (aspectFilters?.kd) {
             conditions.push({
-              name: maMapping[key],
-              value: [value.trend],
-              limit: value.days,
+              name: 'kd',
+              value: [aspectFilters.kd],
+              limit: aspectFilters.KDdays?.toString() || null,
               operator: 'notconcerned',
-              type: 'ma',
+              type: 'kd',
             })
           }
-        }
-      })
 
-      return conditions
+          // Handle Price Rise
+          if (aspectFilters?.priceRise) {
+            conditions.push({
+              name: 'priceRise',
+              value: [aspectFilters.risePercentage?.toString() || null],
+              limit: aspectFilters.riseDays || null,
+              operator: 'notconcerned',
+              type: 'change',
+            })
+          }
+
+          // Handle Limit Up
+          if (aspectFilters?.limitUp) {
+            conditions.push({
+              name: 'limitUp',
+              value: ['notconcerned'],
+              operator: 'notconcerned',
+              type: 'limitUp',
+            })
+          }
+
+          // Handle Moving Averages
+          Object.entries(movingAverageFilters).forEach(([key, value]) => {
+            if (value?.trend && maMapping[key]) {
+              conditions.push({
+                name: maMapping[key],
+                value: [value.trend],
+                limit: value.days || null,
+                operator: 'notconcerned',
+                type: 'ma',
+              })
+            }
+          })
+          return { aspect, conditions }
+        })
+        .filter((entry) => entry.conditions.length > 0) // Filter out aspects with no conditions
     },
   },
 }

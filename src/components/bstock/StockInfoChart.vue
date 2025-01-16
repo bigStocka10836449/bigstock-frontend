@@ -1,6 +1,5 @@
 <template>
   <div class="stock-info-chart-container">
-    <h3>資券訊息</h3>
     <div class="tab-section">
       <button
         class="tab-button"
@@ -17,7 +16,50 @@
         融券
       </button>
     </div>
-    <div id="stock-info-chart" ref="stockInfoChart" class="chart-container"></div>
+    <div
+      v-show="this.localMarginShortData.length"
+      id="stock-info-chart"
+      ref="stockInfoChart"
+      class="chart-container"
+    ></div>
+    <div class="table-container">
+      <div class="scrollable-table-wrapper">
+        <table v-if="this.localMarginShortData.length" class="stock-info-table">
+          <thead>
+            <tr>
+              <th>交易日期</th>
+              <th>融資餘額變動</th>
+              <th>融券餘額變動</th>
+            </tr>
+          </thead>
+          <tbody>
+            <!-- 動態生成資料列 -->
+            <tr v-for="(item, index) in reversedMarginShortData" :key="index">
+              <td>{{ item.tradingDay }}</td>
+              <td
+                :style="{
+                  color: getColor(item.marginPurchase - item.marginSales - item.cashRedemption),
+                }"
+              >
+                {{ item.marginPurchase - item.marginSales - item.cashRedemption }}
+              </td>
+              <td
+                :style="{
+                  color: getColor(item.shortSale - item.shortConvering - item.stockRedemption),
+                }"
+              >
+                {{ item.shortSale - item.shortConvering - item.stockRedemption }}
+              </td>
+            </tr>
+          </tbody>
+        </table>
+        <!-- 當沒有資料時顯示提示 -->
+        <div v-else class="no-data-message">
+          <p>🌿 暫無數據 🌿</p>
+          <p>或許，市場正在醞釀著下一次波動的契機。</p>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -36,6 +78,11 @@ export default {
       default: () => ({}),
     },
   },
+  computed: {
+    reversedMarginShortData() {
+      return this.localMarginShortData.slice().reverse()
+    },
+  },
   data() {
     return {
       chart: null,
@@ -47,6 +94,7 @@ export default {
   watch: {
     marginShortData: {
       handler(value) {
+        if (!value) return // 確保數據存在
         this.localMarginShortData = [...value]
         this.updateChartData(this.localMarginShortData)
       },
@@ -61,10 +109,20 @@ export default {
     //確保 DOM 完全準備好後再初始化圖表
     this.$nextTick(() => {
       this.initChart()
+      const resizeObserver = new ResizeObserver(() => {
+      this.resizeChart();
+    });
+    resizeObserver.observe(this.$refs.stockInfoChart.parentElement);
       this.updateChartData(this.localMarginShortData)
     })
   },
   methods: {
+    getColor(value) {
+      if (value > 0) return '#f44336' // 紅色
+      if (value < 0) return '#4caf50' // 綠色
+      return '#000000' // 黑色
+    },
+
     renderChart(
       dates,
       marginPurchaseList,
@@ -91,7 +149,7 @@ export default {
           // 融券情況下計算 values
           values = dates.map(
             (_, index) =>
-              shortSalesList[index] - shortConveringList[index] - stockRedemptionList[index],
+              shortConveringList[index] - stockRedemptionList[index] - shortSalesList[index],
           )
           break
 
@@ -104,8 +162,7 @@ export default {
         tooltip: {
           trigger: 'item',
           formatter: (params) => {
-            // 確保顯示對應的 X 軸數據和系列數據
-            return `日期: ${params.name}<br>數值: ${params.value}`
+            return '日期:' + params.name + '<br>' + '數值:' + params.value
           },
         },
         xAxis: {
@@ -143,7 +200,7 @@ export default {
             data: values,
             itemStyle: {
               color: (params) => {
-                return params.value >= 0 ? '#f44336' : '#4caf50' // 紅色為正數，綠色為負數
+                return this.getColor(params.value) // 紅色為正數，綠色為負數
               },
             },
           },
@@ -185,8 +242,32 @@ export default {
       this.updateChartData(this.localMarginShortData)
     },
     initChart() {
-      this.chart = echarts.init(this.$refs.stockInfoChart)
+      const chartContainer = this.$refs.stockInfoChart
+
+      // 动态获取容器的宽度
+      const containerWidth = chartContainer.parentElement.offsetWidth
+
+      // 设置宽度为容器宽度，高度可以固定
+      chartContainer.style.width = `${containerWidth}px`
+      chartContainer.style.height = '400px'
+
+      // 初始化图表
+      this.chart = echarts.init(chartContainer)
     },
+
+    resizeChart() {
+    const chartContainer = this.$refs.stockInfoChart;
+
+    // 动态获取父容器的宽度
+    const containerWidth = chartContainer.parentElement.offsetWidth;
+
+    // 更新容器宽度并触发图表调整
+    chartContainer.style.width = `${containerWidth}px`;
+    chartContainer.style.height = '400px'; // 高度保持固定
+    if (this.chart) {
+      this.chart.resize();
+    }
+  },
 
     updateChartData(localMarginShortData) {
       if (!localMarginShortData || localMarginShortData.length === 0) {
@@ -214,8 +295,10 @@ export default {
       )
     },
     resizeChart() {
+      console.log('chart 被 要重製')
       if (this.chart) {
         this.chart.resize()
+        console.log('chart 已被重製')
       }
     },
   },
@@ -269,5 +352,63 @@ export default {
 .tab-button.active {
   background-color: #66bb6a;
   font-weight: bold;
+}
+
+.scrollable-table-wrapper {
+  max-height: 250px;
+  overflow-y: auto;
+  border: 1px solid #585858;
+  border-radius: 8px;
+}
+
+.table-container {
+  background: linear-gradient(to bottom, #b8aaaa, #fefefe);
+  padding: 20px;
+  border-radius: 12px;
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.1);
+  max-width: 800px;
+  margin: 20px auto;
+  font-family: 'Georgia', serif;
+}
+
+.stock-info-table {
+  width: 100%;
+  border-collapse: collapse;
+  text-align: left;
+  font-size: 16px;
+  color: #333;
+}
+
+.stock-info-table thead {
+  background: rgb(146, 143, 143);
+  border-bottom: 2px solid #ddd;
+}
+
+.stock-info-table th {
+  padding: 12px;
+  font-weight: bold;
+  text-align: center;
+}
+
+.stock-info-table td {
+  padding: 10px;
+  border-bottom: 1px solid #eee;
+  text-align: center;
+}
+
+.stock-info-table tr:hover {
+  background: #f9f9f9;
+}
+
+.no-data-message {
+  text-align: center;
+  color: #555;
+  font-style: italic;
+  margin-top: 20px;
+  font-size: 18px;
+}
+
+.no-data-message p {
+  margin: 5px 0;
 }
 </style>

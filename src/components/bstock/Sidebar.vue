@@ -29,16 +29,28 @@
               <transition name="slide">
                 <div v-if="!collapsedSubGroups.dailyKD">
                   <label>
-                    <input type="radio" name="dailyKDFilter" value="20" :checked="filters.daily.kd === '20'" @click="toggleDailyKD('20')" />
-                    日KD連續 {{ dailyKDdays || 'N' }} 天處於 20 以下
+                    <input
+                      type="radio"
+                      name="dailyKDFilter"
+                      value="20"
+                      :checked="filters.daily.kd === '20'"
+                      @click="toggleDailyKD('20')"
+                    />
+                    日KD連續 {{ filters.daily.KDdays || 'N' }} 天處於 20 以下
                   </label>
                   <label>
-                    <input type="radio" name="dailyKDFilter" value="80" :checked="filters.daily.kd === '80'" @click="toggleDailyKD('80')" />
-                    日KD連續 {{ dailyKDdays || 'N' }} 天處於 80 以上
+                    <input
+                      type="radio"
+                      name="dailyKDFilter"
+                      value="80"
+                      :checked="filters.daily.kd === '80'"
+                      @click="toggleDailyKD('80')"
+                    />
+                    日KD連續 {{ filters.daily.KDdays || 'N' }} 天處於 80 以上
                   </label>
 
                   <label>
-                    天數：<input type="number" v-model.number="dailyKDdays" min="1" />
+                    天數：<input type="number" v-model.number="filters.daily.KDdays" min="1" />
                   </label>
                 </div>
               </transition>
@@ -46,18 +58,18 @@
 
             <!-- 其他條件 -->
             <div class="sub-group">
-              <h4 class="sub-group-title"  @click="toggleSubGroup('dailyOther')">其他查詢條件</h4>
+              <h4 class="sub-group-title" @click="toggleSubGroup('dailyOther')">其他查詢條件</h4>
               <transition name="slide">
                 <div v-if="!collapsedSubGroups.dailyOther">
                   <label>
                     <input type="checkbox" v-model="filters.daily.priceRise" />
-                    連續 {{ dailyRiseDays || 'N' }} 天漲幅超過 {{ dailyRisePercentage || 'X' }}%
+                    連續 {{ filters.daily.riseDays || 'N' }} 天漲幅超過 {{ filters.daily.risePercentage || 'X' }}%
                   </label>
                   <label>
-                    天數：<input type="number" v-model.number="dailyRiseDays" min="1" />
+                    天數：<input type="number" v-model.number="filters.daily.riseDays" min="1" />
                   </label>
                   <label>
-                    百分比：<input type="number" v-model.number="dailyRisePercentage" step="0.1" />
+                    百分比：<input type="number" v-model.number="filters.daily.risePercentage" step="1" />
                   </label>
                   <label>
                     <input type="checkbox" v-model="filters.daily.limitUp" /> 今日是否漲停
@@ -68,21 +80,39 @@
 
             <!-- MA條件 -->
             <div class="sub-group">
-              <h4 class="sub-group-title"  @click="toggleSubGroup('dailyMA')">MA趨勢</h4>
+              <h4 class="sub-group-title" @click="toggleSubGroup('dailyMA')">MA趨勢</h4>
               <transition name="slide">
                 <div v-if="!collapsedSubGroups.dailyMA">
                   <div v-for="(trend, key) in movingAverageFilters.daily" :key="key">
                     <h5>{{ key }}</h5>
                     <label>
-                      <input type="radio" :name="'trend-daily-' + key" value="up" :checked="trend.trend === 'up'" @click="toggleDailyMA(key, 'up')" />
+                      <input
+                        type="radio"
+                        :name="'trend-daily-' + key"
+                        value="up"
+                        :checked="trend.trend === 'up'"
+                        @click="toggleDailyMA(key, 'up')"
+                      />
                       趨勢往上
                     </label>
                     <label>
-                      <input type="radio" :name="'trend-daily-' + key" value="flat" :checked="trend.trend === 'flat'" @click="toggleDailyMA(key, 'flat')" />
+                      <input
+                        type="radio"
+                        :name="'trend-daily-' + key"
+                        value="flat"
+                        :checked="trend.trend === 'flat'"
+                        @click="toggleDailyMA(key, 'flat')"
+                      />
                       趨勢持平
                     </label>
                     <label>
-                      <input type="radio" :name="'trend-daily-' + key" value="down" :checked="trend.trend === 'down'" @click="toggleDailyMA(key, 'down')" />
+                      <input
+                        type="radio"
+                        :name="'trend-daily-' + key"
+                        value="down"
+                        :checked="trend.trend === 'down'"
+                        @click="toggleDailyMA(key, 'down')"
+                      />
                       趨勢往下
                     </label>
                     <label>
@@ -98,7 +128,7 @@
 
       <!-- 周條件 -->
       <div class="filter-section">
-        <h3  @click="toggleSection('weekly')">
+        <h3 @click="toggleSection('weekly')">
           周條件
           <span :class="['toggle-indicator', { rotated: collapsedSections.weekly }]">▼</span>
         </h3>
@@ -106,19 +136,31 @@
           <div v-if="!collapsedSections.weekly">
             <!-- KD條件 -->
             <div class="sub-group">
-              <h4 class="sub-group-title"  @click="toggleSubGroup('weeklyKD')">KD條件</h4>
+              <h4 class="sub-group-title" @click="toggleSubGroup('weeklyKD')">KD條件</h4>
               <transition name="slide">
                 <div v-if="!collapsedSubGroups.weeklyKD">
                   <label>
-                    <input type="radio" name="weeklyKDFilter" value="20" :checked="filters.weekly.kd === '20'" @click="toggleWeeklyKD('20')" />
-                    周KD連續 {{ weeklyKDdays || 'N' }} 周處於 20 以下
+                    <input
+                      type="radio"
+                      name="weeklyKDFilter"
+                      value="20"
+                      :checked="filters.weekly.kd === '20'"
+                      @click="toggleWeeklyKD('20')"
+                    />
+                    周KD連續 {{ filters.weekly.KDdays || 'N' }} 周處於 20 以下
                   </label>
                   <label>
-                    <input type="radio" name="weeklyKDFilter" value="80" :checked="filters.weekly.kd === '80'" @click="toggleWeeklyKD('80')" />
-                    周KD連續 {{ weeklyKDdays || 'N' }} 周處於 80 以上
+                    <input
+                      type="radio"
+                      name="weeklyKDFilter"
+                      value="80"
+                      :checked="filters.weekly.kd === '80'"
+                      @click="toggleWeeklyKD('80')"
+                    />
+                    周KD連續 {{ filters.weekly.KDdays || 'N' }} 周處於 80 以上
                   </label>
                   <label>
-                    周數：<input type="number" v-model.number="weeklyKDdays" min="1" />
+                    周數：<input type="number" v-model.number="filters.weekly.KDdays" min="1" />
                   </label>
                 </div>
               </transition>
@@ -126,21 +168,39 @@
 
             <!-- MA條件 -->
             <div class="sub-group">
-              <h4 class="sub-group-title"  @click="toggleSubGroup('weeklyMA')">MA趨勢</h4>
+              <h4 class="sub-group-title" @click="toggleSubGroup('weeklyMA')">MA趨勢</h4>
               <transition name="slide">
                 <div v-if="!collapsedSubGroups.weeklyMA">
                   <div v-for="(trend, key) in movingAverageFilters.weekly" :key="key">
                     <h5>{{ key }}</h5>
                     <label>
-                      <input type="radio" :name="'trend-weekly-' + key" value="up" :checked="trend.trend === 'up'" @click="toggleWeeklyMA(key, 'up')" />
+                      <input
+                        type="radio"
+                        :name="'trend-weekly-' + key"
+                        value="up"
+                        :checked="trend.trend === 'up'"
+                        @click="toggleWeeklyMA(key, 'up')"
+                      />
                       趨勢往上
                     </label>
                     <label>
-                      <input type="radio" :name="'trend-weekly-' + key" value="flat" :checked="trend.trend === 'flat'" @click="toggleWeeklyMA(key, 'flat')" />
+                      <input
+                        type="radio"
+                        :name="'trend-weekly-' + key"
+                        value="flat"
+                        :checked="trend.trend === 'flat'"
+                        @click="toggleWeeklyMA(key, 'flat')"
+                      />
                       趨勢持平
                     </label>
                     <label>
-                      <input type="radio" :name="'trend-weekly-' + key" value="down" :checked="trend.trend === 'down'" @click="toggleWeeklyMA(key, 'down')" />
+                      <input
+                        type="radio"
+                        :name="'trend-weekly-' + key"
+                        value="down"
+                        :checked="trend.trend === 'down'"
+                        @click="toggleWeeklyMA(key, 'down')"
+                      />
                       趨勢往下
                     </label>
                     <label>
@@ -164,43 +224,72 @@
           <div v-if="!collapsedSections.monthly">
             <!-- KD條件 -->
             <div class="sub-group">
-              <h4 class="sub-group-title"  @click="toggleSubGroup('monthlyKD')">KD條件</h4>
+              <h4 class="sub-group-title" @click="toggleSubGroup('monthlyKD')">KD條件</h4>
               <transition name="slide">
                 <div v-if="!collapsedSubGroups.monthlyKD">
                   <label>
-                    <input type="radio" name="monthlyKDFilter" value="20" :checked="filters.monthly.kd === '20'" @click="toggleMonthlyKD('20')" />
-                    月KD連續 {{ monthlyKDdays || 'N' }} 月處於 20 以下
+                    <input
+                      type="radio"
+                      name="monthlyKDFilter"
+                      value="20"
+                      :checked="filters.monthly.kd === '20'"
+                      @click="toggleMonthlyKD('20')"
+                    />
+                    月KD連續 {{ filters.monthly.KDdays || 'N' }} 月處於 20 以下
                   </label>
                   <label>
-                    <input type="radio" name="monthlyKDFilter" value="80" :checked="filters.monthly.kd === '80'" @click="toggleMonthlyKD('80')" />
-                    月KD連續 {{ monthlyKDdays || 'N' }} 月處於 80 以上
+                    <input
+                      type="radio"
+                      name="monthlyKDFilter"
+                      value="80"
+                      :checked="filters.monthly.kd === '80'"
+                      @click="toggleMonthlyKD('80')"
+                    />
+                    月KD連續 {{ filters.monthly.KDdays || 'N' }} 月處於 80 以上
                   </label>
 
                   <label>
-                    月數：<input type="number" v-model.number="monthlyKDdays" min="1" />
+                    月數：<input type="number" v-model.number="filters.monthly.KDdays" min="1" />
                   </label>
-
                 </div>
               </transition>
             </div>
 
             <!-- MA條件 -->
             <div class="sub-group">
-              <h4 class="sub-group-title"  @click="toggleSubGroup('monthlyMA')">MA趨勢</h4>
+              <h4 class="sub-group-title" @click="toggleSubGroup('monthlyMA')">MA趨勢</h4>
               <transition name="slide">
                 <div v-if="!collapsedSubGroups.monthlyMA">
                   <div v-for="(trend, key) in movingAverageFilters.monthly" :key="key">
                     <h5>{{ key }}</h5>
                     <label>
-                      <input type="radio" :name="'trend-monthly-' + key" value="up" :checked="trend.trend === 'up'" @click="toggleMonthlyMA(key, 'up')" />
+                      <input
+                        type="radio"
+                        :name="'trend-monthly-' + key"
+                        value="up"
+                        :checked="trend.trend === 'up'"
+                        @click="toggleMonthlyMA(key, 'up')"
+                      />
                       趨勢往上
                     </label>
                     <label>
-                      <input type="radio" :name="'trend-monthly-' + key" value="flat" :checked="trend.trend === 'flat'" @click="toggleMonthlyMA(key, 'flat')" />
+                      <input
+                        type="radio"
+                        :name="'trend-monthly-' + key"
+                        value="flat"
+                        :checked="trend.trend === 'flat'"
+                        @click="toggleMonthlyMA(key, 'flat')"
+                      />
                       趨勢持平
                     </label>
                     <label>
-                      <input type="radio" :name="'trend-monthly-' + key" value="down" :checked="trend.trend === 'down'" @click="toggleMonthlyMA(key, 'down')" />
+                      <input
+                        type="radio"
+                        :name="'trend-monthly-' + key"
+                        value="down"
+                        :checked="trend.trend === 'down'"
+                        @click="toggleMonthlyMA(key, 'down')"
+                      />
                       趨勢往下
                     </label>
                     <label>
@@ -222,30 +311,25 @@
 
 <script>
 export default {
-  name: "Sidebar",
+  name: 'Sidebar',
   data() {
     return {
       isCollapsed: false,
-      dailyKDdays: null,
-      dailyRiseDays: null,
-      dailyRisePercentage: null,
-      weeklyKDdays: null,
-      monthlyKDdays: null,
       movingAverageFilters: {
         daily: {
-          "5日均線": { trend: null, days: null },
-          "10日均線": { trend: null, days: null },
-          "20日均線": { trend: null, days: null },
-          "60日均線": { trend: null, days: null },
+          '5日均線': { trend: null, days: null },
+          '10日均線': { trend: null, days: null },
+          '20日均線': { trend: null, days: null },
+          '60日均線': { trend: null, days: null },
         },
         weekly: {
-          "5周均線": { trend: null, days: null },
-          "10周均線": { trend: null, days: null },
-          "20周均線": { trend: null, days: null },
+          '5周均線': { trend: null, days: null },
+          '10周均線': { trend: null, days: null },
+          '20周均線': { trend: null, days: null },
         },
         monthly: {
-          "5月均線": { trend: null, days: null },
-          "10月均線": { trend: null, days: null },
+          '5月均線': { trend: null, days: null },
+          '10月均線': { trend: null, days: null },
         },
       },
       filters: {
@@ -253,12 +337,17 @@ export default {
           kd: null,
           priceRise: false,
           limitUp: false,
+          KDdays: null,
+          riseDays: null,
+          risePercentage: null,
         },
         weekly: {
           kd: null,
+          KDdays: null,
         },
         monthly: {
           kd: null,
+          KDdays: null,
         },
       },
       collapsedSections: {
@@ -275,38 +364,38 @@ export default {
         monthlyKD: true,
         monthlyMA: true,
       },
-    };
+    }
   },
   methods: {
     toggleSidebar() {
-      this.isCollapsed = !this.isCollapsed;
+      this.isCollapsed = !this.isCollapsed
     },
     toggleSection(section) {
-      this.collapsedSections[section] = !this.collapsedSections[section];
+      this.collapsedSections[section] = !this.collapsedSections[section]
     },
     toggleSubGroup(subGroup) {
-      this.collapsedSubGroups[subGroup] = !this.collapsedSubGroups[subGroup];
+      this.collapsedSubGroups[subGroup] = !this.collapsedSubGroups[subGroup]
     },
     toggleDailyKD(type) {
-      this.filters.daily.kd = this.filters.daily.kd === type ? null : type;
+      this.filters.daily.kd = this.filters.daily.kd === type ? null : type
     },
     toggleWeeklyKD(type) {
-      this.filters.weekly.kd = this.filters.weekly.kd === type ? null : type;
+      this.filters.weekly.kd = this.filters.weekly.kd === type ? null : type
     },
     toggleMonthlyKD(type) {
-      this.filters.monthly.kd = this.filters.monthly.kd === type ? null : type;
+      this.filters.monthly.kd = this.filters.monthly.kd === type ? null : type
     },
     toggleDailyMA(key, trend) {
-      const ma = this.movingAverageFilters.daily[key];
-      ma.trend = ma.trend === trend ? null : trend;
+      const ma = this.movingAverageFilters.daily[key]
+      ma.trend = ma.trend === trend ? null : trend
     },
     toggleWeeklyMA(key, trend) {
-      const ma = this.movingAverageFilters.weekly[key];
-      ma.trend = ma.trend === trend ? null : trend;
+      const ma = this.movingAverageFilters.weekly[key]
+      ma.trend = ma.trend === trend ? null : trend
     },
     toggleMonthlyMA(key, trend) {
-      const ma = this.movingAverageFilters.monthly[key];
-      ma.trend = ma.trend === trend ? null : trend;
+      const ma = this.movingAverageFilters.monthly[key]
+      ma.trend = ma.trend === trend ? null : trend
     },
     applyFilters() {
       const allFilters = {
@@ -314,14 +403,13 @@ export default {
         weekly: this.filters.weekly,
         monthly: this.filters.monthly,
         movingAverage: this.movingAverageFilters,
-      };
-      console.log("Applied Filters:", allFilters);
-      this.$emit("apply-filters", allFilters);
+      }
+      console.log('Applied Filters:', allFilters)
+      this.$emit('apply-filters', allFilters)
     },
   },
-};
+}
 </script>
-
 
 <style scoped>
 /**** 滾軸樣式 ****/
@@ -352,7 +440,9 @@ export default {
 .filter-section {
   margin-bottom: 20px; /* 區塊間距 */
   padding: 10px; /* 區塊內部填充 */
-  transition: transform 0.3s ease, box-shadow 0.3s ease; /* 過渡效果 */
+  transition:
+    transform 0.3s ease,
+    box-shadow 0.3s ease; /* 過渡效果 */
   background-color: rgba(44, 44, 44, 0.9); /* 背景顏色 */
   border-radius: 8px; /* 圓角 */
 }
@@ -365,7 +455,7 @@ export default {
 
 /**** 標題樣式 ****/
 .section-title {
-  font-family: "Georgia", serif; /* 字體 */
+  font-family: 'Georgia', serif; /* 字體 */
   font-size: 18px; /* 字體大小 */
   margin: 0; /* 無外距 */
   color: #ffffff; /* 字體顏色 */
@@ -373,7 +463,9 @@ export default {
   justify-content: space-between; /* 左右對齊 */
   align-items: center; /* 垂直居中 */
   cursor: pointer; /* 滑鼠指標為手形 */
-  transition: color 0.3s ease, background-color 0.3s ease; /* 過渡效果 */
+  transition:
+    color 0.3s ease,
+    background-color 0.3s ease; /* 過渡效果 */
 }
 
 .section-title:hover {
@@ -398,22 +490,21 @@ label {
   margin-bottom: 10px; /* 每個條件之間的間距 */
 }
 
-label input[type="radio"],
-label input[type="checkbox"] {
+label input[type='radio'],
+label input[type='checkbox'] {
   margin-right: 8px; /* 與文字的間距 */
 }
 
-label input[type="number"] {
+label input[type='number'] {
   margin-left: 10px; /* 與標籤的間距 */
   margin-top: 5px; /* 增加輸入框上方間距 */
   width: 60px; /* 控制數字框的寬度 */
 }
 
-
 /**** 輸入框樣式 ****/
 /* 文藝風格的單選框與勾選框 */
-input[type="radio"],
-input[type="checkbox"] {
+input[type='radio'],
+input[type='checkbox'] {
   appearance: none; /* 移除預設樣式 */
   width: 18px; /* 寬度 */
   height: 18px; /* 高度 */
@@ -424,19 +515,19 @@ input[type="checkbox"] {
   transition: all 0.3s ease; /* 過渡效果 */
 }
 
-input[type="radio"]:checked,
-input[type="checkbox"]:checked {
+input[type='radio']:checked,
+input[type='checkbox']:checked {
   background-color: #4caf50; /* 選中時的背景色 */
   border-color: #66bb6a; /* 選中時的邊框色 */
 }
 
-input[type="radio"]:hover,
-input[type="checkbox"]:hover {
+input[type='radio']:hover,
+input[type='checkbox']:hover {
   border-color: #66bb6a; /* 滑鼠懸停時的邊框顏色 */
 }
 
 /**** 輸入框數字 ****/
-input[type="number"] {
+input[type='number'] {
   width: 50px; /* 寬度 */
   padding: 4px 6px; /* 內部填充 */
   font-size: 14px; /* 字體大小 */
@@ -444,25 +535,27 @@ input[type="number"] {
   border-radius: 5px; /* 圓角 */
   background-color: #2c2c2c; /* 背景色 */
   color: #ffffff; /* 字體顏色 */
-  transition: border-color 0.3s ease, box-shadow 0.3s ease; /* 過渡效果 */
+  transition:
+    border-color 0.3s ease,
+    box-shadow 0.3s ease; /* 過渡效果 */
 }
 
 /* 統一輸入框與按鈕樣式 */
-input[type="number"],
-input[type="radio"],
-input[type="checkbox"] {
+input[type='number'],
+input[type='radio'],
+input[type='checkbox'] {
   transition: all 0.2s ease-in-out;
 }
 
-input[type="number"]:focus {
+input[type='number']:focus {
   outline: none;
   border: 2px solid #66bb6a;
   box-shadow: 0 0 5px #66bb6a;
 }
 
 /**** 滑鼠懸停與文字 ****/
-label:hover input[type="radio"],
-label:hover input[type="checkbox"] {
+label:hover input[type='radio'],
+label:hover input[type='checkbox'] {
   border-color: #66bb6a; /* 懸停時邊框顏色 */
 }
 
@@ -471,7 +564,7 @@ label:hover {
 }
 
 .input-group label {
-  font-family: "Arial", sans-serif; /* 字體 */
+  font-family: 'Arial', sans-serif; /* 字體 */
   color: #ffffff; /* 字體顏色 */
   margin-right: 5px; /* 間距 */
 }
@@ -486,9 +579,11 @@ label:hover {
   border: none;
   border-radius: 5px; /* 圓角 */
   font-size: 16px; /* 字體大小 */
-  font-family: "Arial", sans-serif;
+  font-family: 'Arial', sans-serif;
   cursor: pointer; /* 滑鼠指標 */
-  transition: background-color 0.3s ease, transform 0.3s ease;
+  transition:
+    background-color 0.3s ease,
+    transform 0.3s ease;
 }
 
 .filter-button:hover {
