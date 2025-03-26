@@ -317,19 +317,28 @@ export default {
       isCollapsed: false,
       movingAverageFilters: {
         daily: {
-          '5日均線': { trend: null, days: null },
-          '10日均線': { trend: null, days: null },
-          '20日均線': { trend: null, days: null },
-          '60日均線': { trend: null, days: null },
+          '5均線': { trend: null, days: null },
+          '10均線': { trend: null, days: null },
+          '20均線': { trend: null, days: null },
+          '60均線': { trend: null, days: null },
+          '120均線': { trend: null, days: null },
+          '240均線': { trend: null, days: null },
         },
         weekly: {
-          '5周均線': { trend: null, days: null },
-          '10周均線': { trend: null, days: null },
-          '20周均線': { trend: null, days: null },
+          '5均線': { trend: null, days: null },
+          '10均線': { trend: null, days: null },
+          '20均線': { trend: null, days: null },
+          '60均線': { trend: null, days: null },
+          '120均線': { trend: null, days: null },
+          '240均線': { trend: null, days: null },
         },
         monthly: {
-          '5月均線': { trend: null, days: null },
-          '10月均線': { trend: null, days: null },
+          '5均線': { trend: null, days: null },
+          '10均線': { trend: null, days: null },
+          '20均線': { trend: null, days: null },
+          '60均線': { trend: null, days: null },
+          '120均線': { trend: null, days: null },
+          '240均線': { trend: null, days: null },
         },
       },
       filters: {
@@ -381,6 +390,7 @@ export default {
     },
     toggleWeeklyKD(type) {
       this.filters.weekly.kd = this.filters.weekly.kd === type ? null : type
+      console.log(this.filters.weekly.kd );
     },
     toggleMonthlyKD(type) {
       this.filters.monthly.kd = this.filters.monthly.kd === type ? null : type

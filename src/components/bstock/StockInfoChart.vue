@@ -277,13 +277,13 @@ export default {
       const sortedData = localMarginShortData.sort(
         (a, b) => new Date(a.tradingDay) - new Date(b.tradingDay),
       )
-      const dates = sortedData.map((item) => item.tradingDay)
-      const marginPurchaseList = sortedData.map((item) => item.marginPurchase)
-      const marginSalesList = sortedData.map((item) => item.marginSales)
-      const cashRedemptionList = sortedData.map((item) => item.cashRedemption)
-      const shortSaleList = sortedData.map((item) => item.shortSale)
-      const shortConveringList = sortedData.map((item) => item.shortConvering)
-      const stockRedemptionList = sortedData.map((item) => item.stockRedemption)
+      const dates = sortedData.map((item) => item.tradingDay);
+  const marginPurchaseList = sortedData.map((item) => item.marginPurchase ?? 0);
+  const marginSalesList = sortedData.map((item) => item.marginSales ?? 0);
+  const cashRedemptionList = sortedData.map((item) => item.cashRedemption ?? 0);
+  const shortSaleList = sortedData.map((item) => item.shortSale ?? 0);
+  const shortConveringList = sortedData.map((item) => item.shortConvering ?? 0);
+  const stockRedemptionList = sortedData.map((item) => item.stockRedemption ?? 0);
       this.renderChart(
         dates,
         marginPurchaseList,
@@ -294,13 +294,7 @@ export default {
         stockRedemptionList,
       )
     },
-    resizeChart() {
-      console.log('chart 被 要重製')
-      if (this.chart) {
-        this.chart.resize()
-        console.log('chart 已被重製')
-      }
-    },
+
   },
   beforeDestroy() {
     if (this.chart) {

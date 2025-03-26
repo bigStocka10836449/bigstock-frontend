@@ -136,19 +136,22 @@ export default {
     constructConditions(filters) {
       const aspects = ['daily', 'weekly', 'monthly']
       const maMapping = {
-        '5日均線': 'five_days_slope',
-        '10日均線': 'ten_days_slope',
-        '20日均線': 'twenty_days_slope',
-        '60日均線': 'sixty_days_slope',
-        '120日均線': 'one_twenty_days_slope',
-        '240日均線': 'two_fourty_days_slope',
+        '5均線': 'five_ma_slope',
+        '10均線': 'ten_ma_slope',
+        '20均線': 'twenty_ma_slope',
+        '60均線': 'sixty_ma_slope',
+        '120均線': 'one_twenty_ma_slope',
+        '240均線': 'two_fourty_ma_slope',
       }
 
       return aspects
         .map((aspect) => {
+          console.log(aspect);
           const aspectFilters = filters[aspect]
           const movingAverageFilters = filters.movingAverage[aspect] || {}
-
+          if(aspect === 'weekly'){
+            console.log('weekly',movingAverageFilters);
+          }
           const conditions = []
 
           // Handle KD
