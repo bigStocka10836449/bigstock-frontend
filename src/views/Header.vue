@@ -1,14 +1,15 @@
 <template>
   <div class="header">
-    <button @click="selectView('Candlestick')">candlestick</button>
+    <button @click="selectView('Candlestick')" class="login-btn">candlestick</button>
 
     <!-- 已登入 -->
-    <div v-if="props.user.isLoggedIn" class="user-info">
+    <div v-if="props.user.isLogin" class="user-info">
       <span>歡迎, {{ props.user.name }}</span>
+      <div @click="userLogOut" class="login-btn"><span>登出</span></div>
     </div>
 
     <!-- 未登入 -->
-    <div v-else @click="openLoginPopup"><span>登入</span></div>
+    <div v-else @click="openLoginPopup" class="login-btn"><span>登入</span></div>
   </div>
 </template>
 
@@ -17,12 +18,16 @@
 
   const props = defineProps<{
     user: {
-      isLoggedIn: boolean
+      loginToken: string
       name: string
+      isLogin: boolean
     }
-  }>();
-  const emit = defineEmits<(event: 'update-view', view: string) => void>()
-  const openLoginPopupEmit = defineEmits<(event: 'toggle-login-popup', isOpen: boolean) => void>()
+  }>()
+  const emit = defineEmits<{
+    (event: 'update-view', view: string): void
+    (event: 'toggle-login-popup', isOpen: boolean): void
+    (event: 'logout', isLogout: boolean): void
+  }>()
 
   // 當前頁籤：login or register
   const currentTab = ref<'login' | 'register'>('login')
@@ -32,7 +37,11 @@
   }
 
   function openLoginPopup() {
-    openLoginPopupEmit('toggle-login-popup', true)
+    emit('toggle-login-popup', true)
+  }
+
+  function userLogOut() {
+    emit('logout', true)
   }
 </script>
 
@@ -47,16 +56,20 @@
     height: 50px; /* 固定高度 */
   }
 
-  button {
-    background: none;
-    color: white;
-    border: 1px solid white;
-    padding: 5px 10px;
+  .login-btn {
     cursor: pointer;
+    padding: 5px 10px;
+    border: 1px solid white;
+    border-radius: 4px;
+    transition:
+      background-color 0.3s,
+      color 0.3s;
   }
 
-  button:hover {
+  .login-btn:hover,
+  .login-btn:focus {
     background-color: white;
     color: black;
+    outline: none;
   }
 </style>

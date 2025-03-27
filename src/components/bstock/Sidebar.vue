@@ -63,13 +63,18 @@
                 <div v-if="!collapsedSubGroups.dailyOther">
                   <label>
                     <input type="checkbox" v-model="filters.daily.priceRise" />
-                    連續 {{ filters.daily.riseDays || 'N' }} 天漲幅超過 {{ filters.daily.risePercentage || 'X' }}%
+                    連續 {{ filters.daily.riseDays || 'N' }} 天漲幅超過
+                    {{ filters.daily.risePercentage || 'X' }}%
                   </label>
                   <label>
                     天數：<input type="number" v-model.number="filters.daily.riseDays" min="1" />
                   </label>
                   <label>
-                    百分比：<input type="number" v-model.number="filters.daily.risePercentage" step="1" />
+                    百分比：<input
+                      type="number"
+                      v-model.number="filters.daily.risePercentage"
+                      step="1"
+                    />
                   </label>
                   <label>
                     <input type="checkbox" v-model="filters.daily.limitUp" /> 今日是否漲停
@@ -310,329 +315,329 @@
 </template>
 
 <script>
-export default {
-  name: 'Sidebar',
-  data() {
-    return {
-      isCollapsed: false,
-      movingAverageFilters: {
-        daily: {
-          '5均線': { trend: null, days: null },
-          '10均線': { trend: null, days: null },
-          '20均線': { trend: null, days: null },
-          '60均線': { trend: null, days: null },
-          '120均線': { trend: null, days: null },
-          '240均線': { trend: null, days: null },
+  export default {
+    name: 'Sidebar',
+    data() {
+      return {
+        isCollapsed: false,
+        movingAverageFilters: {
+          daily: {
+            '5均線': { trend: null, days: null },
+            '10均線': { trend: null, days: null },
+            '20均線': { trend: null, days: null },
+            '60均線': { trend: null, days: null },
+            '120均線': { trend: null, days: null },
+            '240均線': { trend: null, days: null },
+          },
+          weekly: {
+            '5均線': { trend: null, days: null },
+            '10均線': { trend: null, days: null },
+            '20均線': { trend: null, days: null },
+            '60均線': { trend: null, days: null },
+            '120均線': { trend: null, days: null },
+            '240均線': { trend: null, days: null },
+          },
+          monthly: {
+            '5均線': { trend: null, days: null },
+            '10均線': { trend: null, days: null },
+            '20均線': { trend: null, days: null },
+            '60均線': { trend: null, days: null },
+            '120均線': { trend: null, days: null },
+            '240均線': { trend: null, days: null },
+          },
         },
-        weekly: {
-          '5均線': { trend: null, days: null },
-          '10均線': { trend: null, days: null },
-          '20均線': { trend: null, days: null },
-          '60均線': { trend: null, days: null },
-          '120均線': { trend: null, days: null },
-          '240均線': { trend: null, days: null },
+        filters: {
+          daily: {
+            kd: null,
+            priceRise: false,
+            limitUp: false,
+            KDdays: null,
+            riseDays: null,
+            risePercentage: null,
+          },
+          weekly: {
+            kd: null,
+            KDdays: null,
+          },
+          monthly: {
+            kd: null,
+            KDdays: null,
+          },
         },
-        monthly: {
-          '5均線': { trend: null, days: null },
-          '10均線': { trend: null, days: null },
-          '20均線': { trend: null, days: null },
-          '60均線': { trend: null, days: null },
-          '120均線': { trend: null, days: null },
-          '240均線': { trend: null, days: null },
+        collapsedSections: {
+          daily: true,
+          weekly: true,
+          monthly: true,
         },
-      },
-      filters: {
-        daily: {
-          kd: null,
-          priceRise: false,
-          limitUp: false,
-          KDdays: null,
-          riseDays: null,
-          risePercentage: null,
+        collapsedSubGroups: {
+          dailyKD: true,
+          dailyOther: true,
+          dailyMA: true,
+          weeklyKD: true,
+          weeklyMA: true,
+          monthlyKD: true,
+          monthlyMA: true,
         },
-        weekly: {
-          kd: null,
-          KDdays: null,
-        },
-        monthly: {
-          kd: null,
-          KDdays: null,
-        },
-      },
-      collapsedSections: {
-        daily: true,
-        weekly: true,
-        monthly: true,
-      },
-      collapsedSubGroups: {
-        dailyKD: true,
-        dailyOther: true,
-        dailyMA: true,
-        weeklyKD: true,
-        weeklyMA: true,
-        monthlyKD: true,
-        monthlyMA: true,
-      },
-    }
-  },
-  methods: {
-    toggleSidebar() {
-      this.isCollapsed = !this.isCollapsed
-    },
-    toggleSection(section) {
-      this.collapsedSections[section] = !this.collapsedSections[section]
-    },
-    toggleSubGroup(subGroup) {
-      this.collapsedSubGroups[subGroup] = !this.collapsedSubGroups[subGroup]
-    },
-    toggleDailyKD(type) {
-      this.filters.daily.kd = this.filters.daily.kd === type ? null : type
-    },
-    toggleWeeklyKD(type) {
-      this.filters.weekly.kd = this.filters.weekly.kd === type ? null : type
-      console.log(this.filters.weekly.kd );
-    },
-    toggleMonthlyKD(type) {
-      this.filters.monthly.kd = this.filters.monthly.kd === type ? null : type
-    },
-    toggleDailyMA(key, trend) {
-      const ma = this.movingAverageFilters.daily[key]
-      ma.trend = ma.trend === trend ? null : trend
-    },
-    toggleWeeklyMA(key, trend) {
-      const ma = this.movingAverageFilters.weekly[key]
-      ma.trend = ma.trend === trend ? null : trend
-    },
-    toggleMonthlyMA(key, trend) {
-      const ma = this.movingAverageFilters.monthly[key]
-      ma.trend = ma.trend === trend ? null : trend
-    },
-    applyFilters() {
-      const allFilters = {
-        daily: this.filters.daily,
-        weekly: this.filters.weekly,
-        monthly: this.filters.monthly,
-        movingAverage: this.movingAverageFilters,
       }
-      console.log('Applied Filters:', allFilters)
-      this.$emit('apply-filters', allFilters)
     },
-  },
-}
+    methods: {
+      toggleSidebar() {
+        this.isCollapsed = !this.isCollapsed
+      },
+      toggleSection(section) {
+        this.collapsedSections[section] = !this.collapsedSections[section]
+      },
+      toggleSubGroup(subGroup) {
+        this.collapsedSubGroups[subGroup] = !this.collapsedSubGroups[subGroup]
+      },
+      toggleDailyKD(type) {
+        this.filters.daily.kd = this.filters.daily.kd === type ? null : type
+      },
+      toggleWeeklyKD(type) {
+        this.filters.weekly.kd = this.filters.weekly.kd === type ? null : type
+        console.log(this.filters.weekly.kd)
+      },
+      toggleMonthlyKD(type) {
+        this.filters.monthly.kd = this.filters.monthly.kd === type ? null : type
+      },
+      toggleDailyMA(key, trend) {
+        const ma = this.movingAverageFilters.daily[key]
+        ma.trend = ma.trend === trend ? null : trend
+      },
+      toggleWeeklyMA(key, trend) {
+        const ma = this.movingAverageFilters.weekly[key]
+        ma.trend = ma.trend === trend ? null : trend
+      },
+      toggleMonthlyMA(key, trend) {
+        const ma = this.movingAverageFilters.monthly[key]
+        ma.trend = ma.trend === trend ? null : trend
+      },
+      applyFilters() {
+        const allFilters = {
+          daily: this.filters.daily,
+          weekly: this.filters.weekly,
+          monthly: this.filters.monthly,
+          movingAverage: this.movingAverageFilters,
+        }
+        console.log('Applied Filters:', allFilters)
+        this.$emit('apply-filters', allFilters)
+      },
+    },
+  }
 </script>
 
 <style scoped>
-/**** 滾軸樣式 ****/
-.steps {
-  max-height: calc(100vh - 150px); /* 動態高度 */
-  overflow-y: auto; /* 超過時啟用滾動 */
-}
+  /**** 滾軸樣式 ****/
+  .steps {
+    max-height: calc(100vh - 150px); /* 動態高度 */
+    overflow-y: auto; /* 超過時啟用滾動 */
+  }
 
-.steps::-webkit-scrollbar {
-  width: 8px; /* 滾軸寬度 */
-}
-.steps::-webkit-scrollbar-track {
-  background: #383838; /* 滾軌背景顏色 */
-  border-radius: 4px; /* 滾軌圓角 */
-}
+  .steps::-webkit-scrollbar {
+    width: 8px; /* 滾軸寬度 */
+  }
+  .steps::-webkit-scrollbar-track {
+    background: #383838; /* 滾軌背景顏色 */
+    border-radius: 4px; /* 滾軌圓角 */
+  }
 
-.steps::-webkit-scrollbar-thumb {
-  background-color: #4caf50; /* 滾軸顏色 */
-  border-radius: 4px; /* 滾軸圓角 */
-  border: 2px solid #383838; /* 滾軸邊框 */
-}
+  .steps::-webkit-scrollbar-thumb {
+    background-color: #4caf50; /* 滾軸顏色 */
+    border-radius: 4px; /* 滾軸圓角 */
+    border: 2px solid #383838; /* 滾軸邊框 */
+  }
 
-.steps::-webkit-scrollbar-thumb:hover {
-  background-color: #66bb6a; /* 滾軸懸停顏色 */
-}
+  .steps::-webkit-scrollbar-thumb:hover {
+    background-color: #66bb6a; /* 滾軸懸停顏色 */
+  }
 
-/**** 區塊樣式 ****/
-.filter-section {
-  margin-bottom: 20px; /* 區塊間距 */
-  padding: 10px; /* 區塊內部填充 */
-  transition:
-    transform 0.3s ease,
-    box-shadow 0.3s ease; /* 過渡效果 */
-  background-color: rgba(44, 44, 44, 0.9); /* 背景顏色 */
-  border-radius: 8px; /* 圓角 */
-}
+  /**** 區塊樣式 ****/
+  .filter-section {
+    margin-bottom: 20px; /* 區塊間距 */
+    padding: 10px; /* 區塊內部填充 */
+    transition:
+      transform 0.3s ease,
+      box-shadow 0.3s ease; /* 過渡效果 */
+    background-color: rgba(44, 44, 44, 0.9); /* 背景顏色 */
+    border-radius: 8px; /* 圓角 */
+  }
 
-/* 滑鼠懸停區塊特效 */
-.filter-section:hover {
-  transform: translateY(-3px); /* 懸浮效果 */
-  box-shadow: 0 4px 10px rgba(76, 175, 80, 0.5); /* 綠色陰影效果 */
-}
+  /* 滑鼠懸停區塊特效 */
+  .filter-section:hover {
+    transform: translateY(-3px); /* 懸浮效果 */
+    box-shadow: 0 4px 10px rgba(76, 175, 80, 0.5); /* 綠色陰影效果 */
+  }
 
-/**** 標題樣式 ****/
-.section-title {
-  font-family: 'Georgia', serif; /* 字體 */
-  font-size: 18px; /* 字體大小 */
-  margin: 0; /* 無外距 */
-  color: #ffffff; /* 字體顏色 */
-  display: flex; /* 使用 Flex 布局 */
-  justify-content: space-between; /* 左右對齊 */
-  align-items: center; /* 垂直居中 */
-  cursor: pointer; /* 滑鼠指標為手形 */
-  transition:
-    color 0.3s ease,
-    background-color 0.3s ease; /* 過渡效果 */
-}
+  /**** 標題樣式 ****/
+  .section-title {
+    font-family: 'Georgia', serif; /* 字體 */
+    font-size: 18px; /* 字體大小 */
+    margin: 0; /* 無外距 */
+    color: #ffffff; /* 字體顏色 */
+    display: flex; /* 使用 Flex 布局 */
+    justify-content: space-between; /* 左右對齊 */
+    align-items: center; /* 垂直居中 */
+    cursor: pointer; /* 滑鼠指標為手形 */
+    transition:
+      color 0.3s ease,
+      background-color 0.3s ease; /* 過渡效果 */
+  }
 
-.section-title:hover {
-  color: #4caf50; /* 滑鼠懸停時的文字顏色 */
-  background-color: rgba(76, 175, 80, 0.1); /* 背景變化 */
-  padding: 5px; /* 增加間距 */
-  border-radius: 5px; /* 圓角效果 */
-}
+  .section-title:hover {
+    color: #4caf50; /* 滑鼠懸停時的文字顏色 */
+    background-color: rgba(76, 175, 80, 0.1); /* 背景變化 */
+    padding: 5px; /* 增加間距 */
+    border-radius: 5px; /* 圓角效果 */
+  }
 
-.toggle-indicator {
-  transition: transform 0.3s ease; /* 過渡效果 */
-}
+  .toggle-indicator {
+    transition: transform 0.3s ease; /* 過渡效果 */
+  }
 
-.toggle-indicator.rotated {
-  transform: rotate(180deg); /* 展開狀態旋轉 180 度 */
-}
+  .toggle-indicator.rotated {
+    transform: rotate(180deg); /* 展開狀態旋轉 180 度 */
+  }
 
-/* 清楚分隔每個條件的樣式 */
-label {
-  display: flex; /* 使用 Flex 布局 */
-  align-items: center; /* 垂直居中 */
-  margin-bottom: 10px; /* 每個條件之間的間距 */
-}
+  /* 清楚分隔每個條件的樣式 */
+  label {
+    display: flex; /* 使用 Flex 布局 */
+    align-items: center; /* 垂直居中 */
+    margin-bottom: 10px; /* 每個條件之間的間距 */
+  }
 
-label input[type='radio'],
-label input[type='checkbox'] {
-  margin-right: 8px; /* 與文字的間距 */
-}
+  label input[type='radio'],
+  label input[type='checkbox'] {
+    margin-right: 8px; /* 與文字的間距 */
+  }
 
-label input[type='number'] {
-  margin-left: 10px; /* 與標籤的間距 */
-  margin-top: 5px; /* 增加輸入框上方間距 */
-  width: 60px; /* 控制數字框的寬度 */
-}
+  label input[type='number'] {
+    margin-left: 10px; /* 與標籤的間距 */
+    margin-top: 5px; /* 增加輸入框上方間距 */
+    width: 60px; /* 控制數字框的寬度 */
+  }
 
-/**** 輸入框樣式 ****/
-/* 文藝風格的單選框與勾選框 */
-input[type='radio'],
-input[type='checkbox'] {
-  appearance: none; /* 移除預設樣式 */
-  width: 18px; /* 寬度 */
-  height: 18px; /* 高度 */
-  margin-right: 8px; /* 與文字的間距 */
-  border: 2px solid #4caf50; /* 邊框顏色 */
-  border-radius: 50%; /* 圓角效果 */
-  background-color: transparent; /* 背景透明 */
-  transition: all 0.3s ease; /* 過渡效果 */
-}
+  /**** 輸入框樣式 ****/
+  /* 文藝風格的單選框與勾選框 */
+  input[type='radio'],
+  input[type='checkbox'] {
+    appearance: none; /* 移除預設樣式 */
+    width: 18px; /* 寬度 */
+    height: 18px; /* 高度 */
+    margin-right: 8px; /* 與文字的間距 */
+    border: 2px solid #4caf50; /* 邊框顏色 */
+    border-radius: 50%; /* 圓角效果 */
+    background-color: transparent; /* 背景透明 */
+    transition: all 0.3s ease; /* 過渡效果 */
+  }
 
-input[type='radio']:checked,
-input[type='checkbox']:checked {
-  background-color: #4caf50; /* 選中時的背景色 */
-  border-color: #66bb6a; /* 選中時的邊框色 */
-}
+  input[type='radio']:checked,
+  input[type='checkbox']:checked {
+    background-color: #4caf50; /* 選中時的背景色 */
+    border-color: #66bb6a; /* 選中時的邊框色 */
+  }
 
-input[type='radio']:hover,
-input[type='checkbox']:hover {
-  border-color: #66bb6a; /* 滑鼠懸停時的邊框顏色 */
-}
+  input[type='radio']:hover,
+  input[type='checkbox']:hover {
+    border-color: #66bb6a; /* 滑鼠懸停時的邊框顏色 */
+  }
 
-/**** 輸入框數字 ****/
-input[type='number'] {
-  width: 50px; /* 寬度 */
-  padding: 4px 6px; /* 內部填充 */
-  font-size: 14px; /* 字體大小 */
-  border: 2px solid #4caf50; /* 邊框顏色 */
-  border-radius: 5px; /* 圓角 */
-  background-color: #2c2c2c; /* 背景色 */
-  color: #ffffff; /* 字體顏色 */
-  transition:
-    border-color 0.3s ease,
-    box-shadow 0.3s ease; /* 過渡效果 */
-}
+  /**** 輸入框數字 ****/
+  input[type='number'] {
+    width: 50px; /* 寬度 */
+    padding: 4px 6px; /* 內部填充 */
+    font-size: 14px; /* 字體大小 */
+    border: 2px solid #4caf50; /* 邊框顏色 */
+    border-radius: 5px; /* 圓角 */
+    background-color: #2c2c2c; /* 背景色 */
+    color: #ffffff; /* 字體顏色 */
+    transition:
+      border-color 0.3s ease,
+      box-shadow 0.3s ease; /* 過渡效果 */
+  }
 
-/* 統一輸入框與按鈕樣式 */
-input[type='number'],
-input[type='radio'],
-input[type='checkbox'] {
-  transition: all 0.2s ease-in-out;
-}
+  /* 統一輸入框與按鈕樣式 */
+  input[type='number'],
+  input[type='radio'],
+  input[type='checkbox'] {
+    transition: all 0.2s ease-in-out;
+  }
 
-input[type='number']:focus {
-  outline: none;
-  border: 2px solid #66bb6a;
-  box-shadow: 0 0 5px #66bb6a;
-}
+  input[type='number']:focus {
+    outline: none;
+    border: 2px solid #66bb6a;
+    box-shadow: 0 0 5px #66bb6a;
+  }
 
-/**** 滑鼠懸停與文字 ****/
-label:hover input[type='radio'],
-label:hover input[type='checkbox'] {
-  border-color: #66bb6a; /* 懸停時邊框顏色 */
-}
+  /**** 滑鼠懸停與文字 ****/
+  label:hover input[type='radio'],
+  label:hover input[type='checkbox'] {
+    border-color: #66bb6a; /* 懸停時邊框顏色 */
+  }
 
-label:hover {
-  color: #66bb6a; /* 懸停時文字顏色 */
-}
+  label:hover {
+    color: #66bb6a; /* 懸停時文字顏色 */
+  }
 
-.input-group label {
-  font-family: 'Arial', sans-serif; /* 字體 */
-  color: #ffffff; /* 字體顏色 */
-  margin-right: 5px; /* 間距 */
-}
+  .input-group label {
+    font-family: 'Arial', sans-serif; /* 字體 */
+    color: #ffffff; /* 字體顏色 */
+    margin-right: 5px; /* 間距 */
+  }
 
-/**** 篩選按鈕 ****/
-.filter-button {
-  display: block;
-  width: 100%;
-  padding: 10px 15px;
-  background-color: #4caf50; /* 背景色 */
-  color: #ffffff; /* 字體顏色 */
-  border: none;
-  border-radius: 5px; /* 圓角 */
-  font-size: 16px; /* 字體大小 */
-  font-family: 'Arial', sans-serif;
-  cursor: pointer; /* 滑鼠指標 */
-  transition:
-    background-color 0.3s ease,
-    transform 0.3s ease;
-}
+  /**** 篩選按鈕 ****/
+  .filter-button {
+    display: block;
+    width: 100%;
+    padding: 10px 15px;
+    background-color: #4caf50; /* 背景色 */
+    color: #ffffff; /* 字體顏色 */
+    border: none;
+    border-radius: 5px; /* 圓角 */
+    font-size: 16px; /* 字體大小 */
+    font-family: 'Arial', sans-serif;
+    cursor: pointer; /* 滑鼠指標 */
+    transition:
+      background-color 0.3s ease,
+      transform 0.3s ease;
+  }
 
-.filter-button:hover {
-  background-color: #66bb6a; /* 滑鼠懸停時背景色 */
-  transform: translateY(-2px); /* 浮起效果 */
-}
+  .filter-button:hover {
+    background-color: #66bb6a; /* 滑鼠懸停時背景色 */
+    transform: translateY(-2px); /* 浮起效果 */
+  }
 
-.filter-button:active {
-  transform: translateY(0); /* 點擊時效果 */
-  background-color: #4caf50; /* 恢復原背景色 */
-}
+  .filter-button:active {
+    transform: translateY(0); /* 點擊時效果 */
+    background-color: #4caf50; /* 恢復原背景色 */
+  }
 
-.sub-group {
-  margin-bottom: 20px; /* 子群組之間的間距 */
-}
+  .sub-group {
+    margin-bottom: 20px; /* 子群組之間的間距 */
+  }
 
-.sub-group > label {
-  margin-left: 15px; /* 內部條件的縮排 */
-}
+  .sub-group > label {
+    margin-left: 15px; /* 內部條件的縮排 */
+  }
 
-.sub-group-title {
-  font-size: 16px;
-  font-weight: bold;
-  cursor: pointer;
-  color: #ffffff;
-  padding: 5px 10px;
-  border-radius: 5px;
-  transition: all 0.3s ease;
-}
+  .sub-group-title {
+    font-size: 16px;
+    font-weight: bold;
+    cursor: pointer;
+    color: #ffffff;
+    padding: 5px 10px;
+    border-radius: 5px;
+    transition: all 0.3s ease;
+  }
 
-.sub-group-title:hover,
-.sub-group-title:focus {
-  background-color: rgba(76, 175, 80, 0.2);
-  color: #4caf50;
-  outline: none;
-  box-shadow: 0 0 10px rgba(76, 175, 80, 0.5);
-}
+  .sub-group-title:hover,
+  .sub-group-title:focus {
+    background-color: rgba(76, 175, 80, 0.2);
+    color: #4caf50;
+    outline: none;
+    box-shadow: 0 0 10px rgba(76, 175, 80, 0.5);
+  }
 
-.sub-group-title.rotated {
-  transform: rotate(180deg);
-}
+  .sub-group-title.rotated {
+    transform: rotate(180deg);
+  }
 </style>
