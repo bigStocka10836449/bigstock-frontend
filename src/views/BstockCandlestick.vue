@@ -44,6 +44,7 @@
   import FilterResults from '../components/bstock/FilterResults.vue'
   import Sidebar from '../components/bstock/Sidebar.vue'
   import apiClient from '../router/BstockAxios'
+  import { io } from 'socket.io-client'
 
   export default {
     name: 'BstockCandlestick',
@@ -58,6 +59,7 @@
         stockData: null, // 股票價格數據
         stockMarginShortData: null, // 資券數據
         isKLineChart: true,
+        socket: null,
       }
     },
     methods: {
@@ -123,12 +125,48 @@
 
       async handleFilters(filters) {
         this.filters = filters
-        const conditions = this.constructConditions(filters)
+        const sessionId = await this.getOrCreateSessionId()
+        const conditions = this.constructConditions(filters, sessionId)
+        this.initSocket(sessionId)
         const payload = conditions
+        this.fetchData('/gateway/sse/stockCodeByFilter', payload, 'POST')
+      },
 
-        const data = await this.fetchData('/gateway/StockCodeByFilter', payload, 'POST')
-        this.results = data
-        this.shouldShowResults = data && data.length > 0
+      async getOrCreateSessionId() {
+        let sessionId = localStorage.getItem('sessionId')
+        if (!sessionId) {
+          const response = await this.fetchData('/gateway/sse/session', {}, 'POST')
+          console.log(response)
+          sessionId = response.sessionId
+          localStorage.setItem('sessionId', sessionId)
+        }
+        return sessionId
+      },
+
+      initSocket(sessionId) {
+        if (this.socket) {
+          this.socket.disconnect()
+        }
+
+        // 未來要把port ip 調整不寫在程式裡
+        this.socket = io('http://localhost:9092', {
+          query: { sessionId },
+        })
+
+        this.socket.on('connect', () => {
+          console.log('Socket connected')
+        })
+
+        this.socket.on('update', (resultData) => {
+          this.results = resultData
+          this.shouldShowResults = resultData && resultData.length > 0
+
+          // TODO 通知後端接收到訊息
+          this.socket.emit('clientAck', { sessionId })
+
+          // 主動斷線
+          this.socket.disconnect()
+        })
       },
 
       handleSelectStock(stockCode) {
@@ -137,7 +175,7 @@
         this.fetchMarginShortData(stockCode)
       },
 
-      constructConditions(filters) {
+      constructConditions(filters, sessionId) {
         const aspects = ['daily', 'weekly', 'monthly']
         const maMapping = {
           '5均線': 'five_ma_slope',
@@ -202,7 +240,7 @@
                 })
               }
             })
-            return { aspect, conditions }
+            return { aspect, conditions, sessionId }
           })
           .filter((entry) => entry.conditions.length > 0) // Filter out aspects with no conditions
       },
