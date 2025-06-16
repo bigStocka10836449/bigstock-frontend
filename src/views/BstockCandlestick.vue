@@ -157,6 +157,12 @@
           console.log('Socket connected')
         })
 
+        this.socket.on('connect_error', async (err) => {
+          localStorage.removeItem('sessionId')
+          const newSessionId = await this.getOrCreateSessionId()
+          this.initSocket(newSessionId)
+        })
+
         this.socket.on('update', (resultData) => {
           this.results = resultData
           this.shouldShowResults = resultData && resultData.length > 0
