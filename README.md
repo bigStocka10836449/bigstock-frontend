@@ -37,3 +37,24 @@ npm run build
 ```sh
 npm run lint
 ```
+
+
+## Nginx 部署
+
+1. 執行 `npm run build` 產生 `dist/` 目錄。
+2. 將 `dist/` 內的檔案部署到 Nginx 伺服器的靜態檔案路徑。
+3. 範例設定檔位於 [`nginx.conf.example`](./nginx.conf.example)，內容如下：
+
+```nginx
+server {
+    listen 80;
+    server_name example.com;
+
+    root /var/www/bstock;
+    index index.html;
+
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+}
+```

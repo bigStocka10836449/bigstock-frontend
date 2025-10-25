@@ -43,9 +43,10 @@
   import StockInfoChart from '../components/bstock/StockInfoChart.vue'
   import FilterResults from '../components/bstock/FilterResults.vue'
   import Sidebar from '../components/bstock/Sidebar.vue'
-  import apiClient from '../router/BstockAxios'
+  import apiClient from '../router/bstockAxios'
   import { io } from 'socket.io-client'
-
+  import { socketIoSessionManager } from '../composables/SocketIoSessionManager'
+  const socketUrl = import.meta.env.VITE_SOCKET_URL
   export default {
     name: 'BstockCandlestick',
     components: { Sidebar, FilterResults, Candlestick, StockInfoChart },
@@ -81,30 +82,7 @@
           }
           return response.data
         } catch (error) {
-          if (error.response?.status === 401) {
-            console.warn('Token 無效或過期，嘗試重新獲取 Token...')
-            await this.fetchToken()
-            const newToken = localStorage.getItem('authToken')
-            if (newToken) {
-              return await this.fetchData(apiEndpoint, payload, method)
-            }
-          }
           console.error('API 請求失敗:', error)
-        }
-      },
-
-      async fetchToken() {
-        try {
-          const response = await apiClient.get('/auth/tempToken')
-          const token = response.data.token
-          if (token) {
-            console.log('新 Token 獲取成功:', token)
-            localStorage.setItem('authToken', token)
-          } else {
-            console.error('未獲取到有效的 Token:', response.data)
-          }
-        } catch (error) {
-          console.error('獲取 Token 失敗:', error)
         }
       },
 
@@ -133,23 +111,23 @@
       },
 
       async getOrCreateSessionId() {
-        let sessionId = localStorage.getItem('sessionId')
+        let sessionId = socketIoSessionManager.get()
+
         if (!sessionId) {
           const response = await this.fetchData('/gateway/sse/session', {}, 'POST')
-          console.log(response)
           sessionId = response.sessionId
-          localStorage.setItem('sessionId', sessionId)
+          socketIoSessionManager.set(sessionId)
         }
+
         return sessionId
       },
 
-      initSocket(sessionId) {
+      initSocket(sessionId, hasRetried = false) {
         if (this.socket) {
           this.socket.disconnect()
         }
 
-        // 未來要把port ip 調整不寫在程式裡
-        this.socket = io('http://localhost:9092', {
+        this.socket = io(socketUrl, {
           query: { sessionId },
         })
 
@@ -158,19 +136,22 @@
         })
 
         this.socket.on('connect_error', async (err) => {
-          localStorage.removeItem('sessionId')
-          const newSessionId = await this.getOrCreateSessionId()
-          this.initSocket(newSessionId)
+          console.warn('Socket connect_error:', err)
+
+          if (!hasRetried) {
+            // 只重試一次
+            const newSessionId = await this.getOrCreateSessionId()
+            this.initSocket(newSessionId, true) // 第二次 retry，傳 true 防止無限重試
+          } else {
+            console.error('Second socket connection failed. Giving up.')
+          }
         })
 
         this.socket.on('update', (resultData) => {
           this.results = resultData
           this.shouldShowResults = resultData && resultData.length > 0
 
-          // TODO 通知後端接收到訊息
           this.socket.emit('clientAck', { sessionId })
-
-          // 主動斷線
           this.socket.disconnect()
         })
       },

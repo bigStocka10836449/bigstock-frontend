@@ -10,14 +10,14 @@ const apiClient = axios.create({
 
 // 判斷 token 是否即將過期（預設 15 分鐘內）
 function isTokenExpiringSoon(bufferSeconds = 900): boolean {
-  const expStr = localStorage.getItem('tokenExp');
-  if (!expStr) return true;
+  const expStr = localStorage.getItem('tokenExp')
+  if (!expStr) return true
 
-  const exp = parseInt(expStr, 10);
-  if (isNaN(exp)) return true;
+  const exp = parseInt(expStr, 10)
+  if (isNaN(exp)) return true
 
-  const now = Math.floor(Date.now() / 1000);
-  return exp - now < bufferSeconds;
+  const now = Math.floor(Date.now() / 1000)
+  return exp - now < bufferSeconds
 }
 
 // 判斷是否為 GUEST
@@ -25,7 +25,7 @@ function isGuest(token: string): boolean {
   try {
     const payload = JSON.parse(atob(token.split('.')[1]))
     const role = payload?.role ?? payload?.roles?.[0]
-    return role === 'GUEST'
+    return role === 'Guest'
   } catch {
     return false
   }
@@ -34,10 +34,20 @@ function isGuest(token: string): boolean {
 // 取得新的 GUEST token
 async function fetchGuestToken(): Promise<string | null> {
   try {
-    const resp = await axios.get('/api/guest-token')
-    return `Bearer ${resp.data.token}`
+    const resp = await axios.get('/api/auth/tempToken', {
+      withCredentials: true,
+    });
+
+    const token = `Bearer ${resp.data.token}`;
+    const expRaw = resp.data.exp;
+
+    // 👉 解析 ISO 格式為 UNIX timestamp（秒）
+    const exp = Math.floor(new Date(expRaw).getTime() / 1000);
+    localStorage.setItem('tokenExp', exp.toString());
+
+    return token;
   } catch {
-    return null
+    return null;
   }
 }
 
@@ -45,12 +55,19 @@ async function fetchGuestToken(): Promise<string | null> {
 async function refreshUserToken(token: string): Promise<string | null> {
   try {
     const resp = await axios.post(
-      '/api/refresh-token',
+      '/api/auth/refreshToken',
       {},
       {
         headers: { Authorization: token },
       },
     )
+    const expRaw = resp.data.exp;
+
+    // 👉 解析 ISO 格式為 UNIX timestamp（秒）
+    const exp = Math.floor(new Date(expRaw).getTime() / 1000);
+
+    localStorage.setItem('authToken', `Bearer ${resp.data.accessToken}`);
+    localStorage.setItem('tokenExp', exp.toString());
     return `Bearer ${resp.data.accessToken}`
   } catch {
     return null
@@ -63,8 +80,9 @@ apiClient.interceptors.request.use(
     if (config.url?.includes('/auth/login')) return config
 
     let token = localStorage.getItem('authToken')
-
+    console.log(`token: + ${token}`)
     if (!token || isTokenExpiringSoon(900)) {
+      console.log(`isTokenExpiringSoon:  ${isTokenExpiringSoon(900)}`)
       // 需要刷新
       if (!token || isGuest(token)) {
         token = await fetchGuestToken()
@@ -89,17 +107,10 @@ apiClient.interceptors.request.use(
 // Response Interceptor：後端主動送 x-refreshed-token 時更新
 apiClient.interceptors.response.use(
   (response) => {
-    const refreshedToken = response.headers['x-refreshed-token']
-    const exp = response.data?.exp
-    if (refreshedToken) {
-      localStorage.setItem('authToken', refreshedToken);
-       if (exp) {
-        localStorage.setItem('tokenExp', exp.toString());
-      }
-    }
     if (response.config.url?.includes('/auth/login') && response.data?.accessToken) {
+      const exp = response.data?.exp
       const loginToken = `Bearer ${response.data.accessToken}`
-      localStorage.setItem('authToken', loginToken);
+      localStorage.setItem('authToken', loginToken)
       if (exp) {
         localStorage.setItem('tokenExp', exp.toString())
       }
