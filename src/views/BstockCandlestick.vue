@@ -114,7 +114,7 @@
 
       async fetchMarginShortData(stockCode) {
         const data = await this.fetchData(
-          `/api/biz/stockCodeMarginShortInfo/${stockCode}`,
+          `/biz/stockCodeMarginShortInfo/${stockCode}`,
           {},
           'GET',
         )
