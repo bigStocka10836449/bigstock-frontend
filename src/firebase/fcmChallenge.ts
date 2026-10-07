@@ -1,258 +1,188 @@
-import type {
-  MessagePayload,
-} from 'firebase/messaging'
-
-import bstockAxios from '../router/bstockAxios'
-
 import {
   getFcmToken,
   listenForForegroundMessages,
 } from './fcm'
 
+import bstockAxios from '@/router/bstockAxios'
 
-interface FcmRegisterRequest {
-  fcmToken: string
+
+interface DeviceVerifyMessage {
+
+  type?: string
+
+  challengeId?: string
 }
-
-
-interface FcmVerifyRequest {
-  fcmToken: string
-  challenge: string
-}
-
-
-const VERIFY_TIMEOUT_MS = 30_000
 
 
 /**
- * Register this browser's FCM token with BigStock
- * and complete the DEVICE_VERIFY challenge.
+ * Register the current browser with FCM
+ * and verify the challenge sent by backend.
  */
 export async function registerAndVerifyFcmDevice():
   Promise<string> {
 
-  /*
-   * STEP 1
-   *
-   * Get browser's FCM registration token.
-   */
   const fcmToken =
     await getFcmToken()
 
 
   console.log(
-    '[FCM] Starting device verification.',
+    '[FCM] Starting device verification'
   )
 
 
   /*
-   * STEP 2
+   * IMPORTANT:
    *
-   * Prepare the FCM listener BEFORE calling
-   * Spring Boot /register.
+   * Install foreground listener BEFORE calling
+   * /device/register.
    *
-   * This prevents a race condition.
+   * Backend may immediately send the challenge.
    */
-  let unsubscribe:
-    (() => void) | null = null
-
-
-  let timeoutId:
-    number | null = null
-
-
-  const verificationPromise =
-    new Promise<void>(
-      async (resolve, reject) => {
-
-        try {
-
-          unsubscribe =
-            await listenForForegroundMessages(
-              async (
-                payload: MessagePayload,
-              ) => {
-
-                /*
-                 * Ignore unrelated FCM messages.
-                 */
-                if (
-                  payload.data?.type
-                    !== 'DEVICE_VERIFY'
-                ) {
-
-                  return
-                }
-
-
-                const challengeId =
-                  payload.data?.challengeId
-
-
-                if (!challengeId) {
-
-                  console.error(
-                    '[FCM] DEVICE_VERIFY does not contain challengeId.',
-                  )
-
-                  return
-                }
-
-
-                console.log(
-                  '[FCM] DEVICE_VERIFY received.',
-                )
-
-
-                try {
-
-                  /*
-                   * Your backend calls this field:
-                   *
-                   *     challenge
-                   *
-                   * while FCM sends:
-                   *
-                   *     challengeId
-                   *
-                   * So map it here.
-                   */
-                  const verifyRequest:
-                    FcmVerifyRequest = {
-
-                    fcmToken,
-
-                    challenge:
-                      challengeId,
-                  }
-
-
-                  await bstockAxios.post(
-                    '/fcm/verify',
-                    verifyRequest,
-                  )
-
-
-                  if (timeoutId !== null) {
-
-                    window.clearTimeout(
-                      timeoutId,
-                    )
-                  }
-
-
-                  unsubscribe?.()
-
-
-                  console.log(
-                    '[FCM] Device verified successfully.',
-                  )
-
-
-                  resolve()
-
-                } catch (error) {
-
-                  if (timeoutId !== null) {
-
-                    window.clearTimeout(
-                      timeoutId,
-                    )
-                  }
-
-
-                  unsubscribe?.()
-
-                  reject(error)
-                }
-              },
-            )
-
-
-          /*
-           * Stop waiting after 30 seconds.
-           */
-          timeoutId =
-            window.setTimeout(
-              () => {
-
-                unsubscribe?.()
-
-
-                reject(
-                  new Error(
-                    'FCM verification timed out.',
-                  ),
-                )
-
-              },
-              VERIFY_TIMEOUT_MS,
-            )
-
-        } catch (error) {
-
-          reject(error)
-        }
-      },
-    )
+  const challengePromise =
+    waitForDeviceChallenge()
 
 
   /*
-   * STEP 3
-   *
-   * Listener is now ready.
-   *
-   * Tell Spring Boot to register this token.
+   * Tell backend which FCM token belongs
+   * to this browser.
    */
-  const registerRequest:
-    FcmRegisterRequest = {
-
-    fcmToken,
-  }
-
-
-  try {
-
-    await bstockAxios.post(
-      '/fcm/register',
-      registerRequest,
-    )
-
-  } catch (error) {
-
-    if (timeoutId !== null) {
-
-      window.clearTimeout(
-        timeoutId,
-      )
-    }
+  await bstockAxios.post(
+    '/device/register',
+    {
+      fcmToken,
+      deviceType: 'WEB',
+    },
+    {
+      /*
+       * Prevent auth interceptor from trying
+       * to refresh the guest token while we
+       * are currently creating it.
+       */
+      skipAuthRefresh: true,
+    } as any
+  )
 
 
-    unsubscribe?.()
+  console.log(
+    '[FCM] Device registered, waiting for challenge...'
+  )
 
-    throw error
-  }
+
+  const challengeId =
+    await challengePromise
+
+
+  console.log(
+    '[FCM] Challenge received'
+  )
 
 
   /*
-   * STEP 4
-   *
-   * Wait until:
-   *
-   * Spring
-   *   ↓
-   * FCM
-   *   ↓
-   * DEVICE_VERIFY
-   *   ↓
-   * /verify
+   * Prove that this browser actually received
+   * the FCM challenge.
    */
-  await verificationPromise
+  await bstockAxios.post(
+    '/device/verify',
+    {
+      fcmToken,
+      challenge: challengeId,
+    },
+    {
+      skipAuthRefresh: true,
+    } as any
+  )
 
 
-  /*
-   * Browser has now successfully proven
-   * that it owns this FCM token.
-   */
+  console.log(
+    '[FCM] Device verification completed'
+  )
+
+
   return fcmToken
+}
+
+
+/**
+ * Wait for DEVICE_VERIFY challenge from FCM.
+ */
+async function waitForDeviceChallenge():
+  Promise<string> {
+
+  return new Promise(
+    async (
+      resolve,
+      reject
+    ) => {
+
+      let unsubscribe:
+        (() => void) | undefined
+
+
+      const timeout =
+        window.setTimeout(
+          () => {
+
+            if (unsubscribe) {
+              unsubscribe()
+            }
+
+            reject(
+              new Error(
+                'Timed out waiting for FCM device challenge.'
+              )
+            )
+
+          },
+          15000
+        )
+
+
+      try {
+
+        unsubscribe =
+          await listenForForegroundMessages(
+            (payload) => {
+
+              const data =
+                payload?.data as DeviceVerifyMessage | undefined
+
+
+              if (
+                data?.type !== 'DEVICE_VERIFY'
+              ) {
+                return
+              }
+
+
+              if (!data.challengeId) {
+                return
+              }
+
+
+              window.clearTimeout(
+                timeout
+              )
+
+
+              if (unsubscribe) {
+                unsubscribe()
+              }
+
+
+              resolve(
+                data.challengeId
+              )
+            }
+          )
+
+      } catch (error) {
+
+        window.clearTimeout(
+          timeout
+        )
+
+        reject(error)
+      }
+    }
+  )
 }

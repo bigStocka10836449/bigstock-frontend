@@ -3,65 +3,88 @@ import {
   getToken,
   isSupported,
   onMessage,
-  type MessagePayload,
   type Messaging,
 } from 'firebase/messaging'
 
 import firebaseApp from './firebase'
 
 
-let messaging: Messaging | null = null
+let messagingInstance: Messaging | null = null
 
 
 /**
  * Get Firebase Messaging instance.
- *
- * Returns null when the current browser
- * does not support Firebase Messaging.
  */
-export async function getFirebaseMessaging():
-  Promise<Messaging | null> {
+export async function getFirebaseMessaging(): Promise<Messaging> {
 
   const supported = await isSupported()
 
   if (!supported) {
-
-    console.warn(
-      '[FCM] Firebase Messaging is not supported.',
+    throw new Error(
+      'Firebase Messaging is not supported by this browser.'
     )
-
-    return null
   }
 
-
-  if (!messaging) {
-    messaging = getMessaging(firebaseApp)
+  if (!messagingInstance) {
+    messagingInstance = getMessaging(firebaseApp)
   }
 
-
-  return messaging
+  return messagingInstance
 }
 
 
 /**
- * Get the FCM registration token for this browser.
+ * Get current notification permission.
+ */
+export function getNotificationPermission(): NotificationPermission {
+
+  if (!('Notification' in window)) {
+    throw new Error(
+      'Notification API is not supported by this browser.'
+    )
+  }
+
+  return Notification.permission
+}
+
+
+/**
+ * Ask the user for notification permission.
  *
  * IMPORTANT:
- * This method DOES NOT request notification permission.
- *
- * Permission handling belongs to fcmStartup.ts.
+ * Call this from a real user interaction,
+ * such as a button click.
  */
-export async function getFcmToken():
-  Promise<string> {
+export async function requestNotificationPermission():
+  Promise<NotificationPermission> {
 
-  const firebaseMessaging =
-    await getFirebaseMessaging()
-
-
-  if (!firebaseMessaging) {
-
+  if (!('Notification' in window)) {
     throw new Error(
-      'Firebase Messaging is not supported.',
+      'Notification API is not supported by this browser.'
+    )
+  }
+
+  return await Notification.requestPermission()
+}
+
+
+/**
+ * Obtain the FCM registration token.
+ *
+ * This method DOES NOT request notification permission.
+ * Permission must already be granted.
+ */
+/**
+ * Obtain the FCM registration token.
+ *
+ * This method DOES NOT request notification permission.
+ * Permission must already be granted.
+ */
+export async function getFcmToken(): Promise<string> {
+
+  if (!('Notification' in window)) {
+    throw new Error(
+      'Notification API is not supported by this browser.'
     )
   }
 
@@ -69,53 +92,81 @@ export async function getFcmToken():
   if (Notification.permission !== 'granted') {
 
     throw new Error(
-      'Notification permission has not been granted.',
+      'Notification permission has not been granted.'
     )
   }
 
 
+  const messaging =
+    await getFirebaseMessaging()
+
+
   /*
-   * Register our Firebase Service Worker.
+   * 從 Vite 環境變數取得 Firebase Web Push VAPID Public Key。
+   *
+   * 注意：
+   * 這裡必須使用 Firebase Console：
+   *
+   * Project Settings
+   * → Cloud Messaging
+   * → Web Push certificates
+   *
+   * 裡面的 Public Key。
+   *
+   * 不能使用 Firebase API Key、Server Key
+   * 或 Firebase Admin Private Key。
    */
-  const serviceWorkerRegistration =
-    await navigator.serviceWorker.register(
-      '/firebase-messaging-sw.js',
+  const vapidKey =
+    import.meta.env.VITE_FIREBASE_VAPID_KEY
+
+
+  /*
+   * 開發階段只檢查 VAPID Key 是否成功載入，
+   * 不直接輸出完整 Key。
+   */
+  console.log(
+    '[FCM] VAPID key exists:',
+    Boolean(vapidKey)
+  )
+
+  console.log(
+    '[FCM] VAPID key length:',
+    vapidKey?.length
+  )
+
+
+  if (!vapidKey) {
+
+    throw new Error(
+      'VITE_FIREBASE_VAPID_KEY is missing.'
     )
+  }
 
 
-  /*
-   * Wait until the Service Worker becomes active.
-   */
-  await navigator.serviceWorker.ready
+  console.log(
+    '[FCM] Requesting FCM token...'
+  )
 
 
-  /*
-   * Obtain FCM registration token.
-   */
   const token =
     await getToken(
-      firebaseMessaging,
+      messaging,
       {
-
-        vapidKey:
-          import.meta.env
-            .VITE_FIREBASE_VAPID_KEY,
-
-        serviceWorkerRegistration,
-      },
+        vapidKey,
+      }
     )
 
 
   if (!token) {
 
     throw new Error(
-      'Firebase did not return an FCM token.',
+      'Firebase did not return an FCM token.'
     )
   }
 
 
   console.log(
-    '[FCM] Registration token obtained.',
+    '[FCM] FCM token obtained'
   )
 
 
@@ -124,29 +175,26 @@ export async function getFcmToken():
 
 
 /**
- * Listen for messages while BigStock is
- * currently open in the foreground.
- *
- * Returns an unsubscribe function.
+ * Listen for foreground FCM messages.
  */
 export async function listenForForegroundMessages(
-  callback: (payload: MessagePayload) => void,
+  callback: (payload: any) => void
 ): Promise<() => void> {
 
-  const firebaseMessaging =
+  const messaging =
     await getFirebaseMessaging()
 
 
-  if (!firebaseMessaging) {
-
-    throw new Error(
-      'Firebase Messaging is not supported.',
-    )
-  }
-
-
   return onMessage(
-    firebaseMessaging,
-    callback,
+    messaging,
+    (payload) => {
+
+      console.log(
+        '[FCM] Foreground message:',
+        payload
+      )
+
+      callback(payload)
+    }
   )
 }

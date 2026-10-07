@@ -10,7 +10,8 @@
 
     <!-- 主內容 -->
     <Content :currentComponent="currentComponent" />
-
+    <!-- FCM notification permission modal -->
+    <NotificationPermissionModal />
     <!-- 登入/註冊彈窗 -->
     <div v-if="isLoginPopupVisible" class="popup">
       <div class="popup-content">
@@ -61,6 +62,8 @@
   import apiClient from './router/bstockAxios'
   import { useLocalStorageWithTTL as useLocalStorage } from './composables/UseLocalStorageWithTTL'
   import { number } from 'echarts'
+  import NotificationPermissionModal
+  from '@/components/notification/NotificationPermissionModal.vue'
 
   const {
     data: user,
