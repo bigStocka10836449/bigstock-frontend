@@ -7,7 +7,11 @@ export function parseMarketMessage(topic: MarketTopic, body: string): MarketEven
   if (!snapshot || typeof snapshot !== 'object') throw new Error('市場快照格式不正確')
   let rawMarketData: unknown = snapshot.data
   if (typeof snapshot.data === 'string' && snapshot.data.trim()) {
-    try { rawMarketData = JSON.parse(snapshot.data) } catch { /* 上游不一定回傳 JSON */ }
+    try {
+      rawMarketData = JSON.parse(snapshot.data)
+    } catch {
+      /* 上游不一定回傳 JSON */
+    }
   }
   return { topic, snapshot, rawMarketData, receivedAt: Date.now() }
 }

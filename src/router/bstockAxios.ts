@@ -1,10 +1,44 @@
-import axios from 'axios'
+import axios, { AxiosHeaders, type InternalAxiosRequestConfig } from 'axios'
 
-import {
-  ensureFcmVerified,
-} from '@/firebase/fcmStartup'
+import { authTokenManager } from '@/services/authTokenManager'
 
+/**
+ * ============================================================
+ * BigStock - Axios Client
+ * ============================================================
+ *
+ * JWT 由 authTokenManager 統一管理。
+ *
+ * 本檔案只負責：
+ *
+ * 1. REST API Request
+ * 2. 自動帶入 Authorization
+ * 3. Bootstrap API 白名單
+ * 4. 後端 JWT 更新 Header
+ * 5. 401 自動恢復與單次重試
+ * 6. 會員 Login Token 儲存
+ */
 
+/**
+ * 401 重試旗標。
+ *
+ * 避免：
+ *
+ * API 401
+ *   -> 更新 JWT
+ *   -> 重送 API
+ *   -> 再次 401
+ *   -> 無限循環
+ */
+interface RetryableRequestConfig extends InternalAxiosRequestConfig {
+  _retry?: boolean
+}
+
+/**
+ * BigStock API Client。
+ *
+ * 維持既有的 /api Proxy 路徑。
+ */
 const apiClient = axios.create({
   baseURL: '/api',
   headers: {
@@ -13,437 +47,163 @@ const apiClient = axios.create({
   withCredentials: true,
 })
 
-
-// 判斷 token 是否即將過期（預設 15 分鐘內）
-function isTokenExpiringSoon(bufferSeconds = 900): boolean {
-  const expStr = localStorage.getItem('tokenExp')
-  if (!expStr) return true
-
-  const exp = parseInt(expStr, 10)
-  if (isNaN(exp)) return true
-
-  const now = Math.floor(Date.now() / 1000)
-
-  return exp - now < bufferSeconds
-}
-
-
-// 判斷是否為 GUEST
-function isGuest(token: string): boolean {
-  try {
-    // localStorage 儲存格式為 "Bearer xxx"
-    // JWT decode 前需要先移除 Bearer
-    const jwt = token.replace(/^Bearer\s+/i, '')
-
-    const payload =
-      JSON.parse(
-        atob(jwt.split('.')[1]),
-      )
-
-    const role =
-      payload?.role ??
-      payload?.roles?.[0]
-
-    return String(role) === '4'
-
-  } catch {
-    return false
-  }
-}
-
-
-// 判斷是否為建立驗證狀態時使用的 API
-// 這些 API 本身不能要求既有的 authToken，否則會造成循環呼叫
+/**
+ * Bootstrap API 不要求現有 JWT。
+ *
+ * 這些請求是用來建立認證狀態，
+ * 不能在 Request Interceptor 裡
+ * 再呼叫 getValidToken()。
+ */
 function isAuthBootstrapRequest(url?: string): boolean {
-  if (!url) {
-    return false
-  }
+  if (!url) return false
 
-  return (
-    url.includes('/auth/login')
-    ||
-    url.includes('/auth/tempToken')
-    ||
-    url.includes('/device/register')
-    ||
-    url.includes('/device/verify')
+  return ['/auth/login', '/auth/tempToken', '/device/register', '/device/verify'].some((path) =>
+    url.includes(path),
   )
 }
 
+/**
+ * 統一設定 Authorization Header。
+ */
+function setAuthorization(config: InternalAxiosRequestConfig, token: string): void {
+  const headers = AxiosHeaders.from(config.headers)
 
-// 避免多個 API 同時觸發取得 GUEST token
-let guestTokenPromise: Promise<string | null> | null = null
+  headers.set('Authorization', token)
 
-
-// 取得新的 GUEST token
-async function fetchGuestToken(): Promise<string | null> {
-
-  // 已經有其他 request 正在取得 token
-  // 直接共用同一個 Promise
-  if (guestTokenPromise) {
-    return guestTokenPromise
-  }
-
-  guestTokenPromise = doFetchGuestToken()
-
-  try {
-    return await guestTokenPromise
-
-  } finally {
-    guestTokenPromise = null
-  }
+  config.headers = headers
 }
 
-
-// 實際執行取得 GUEST token
-async function doFetchGuestToken(): Promise<string | null> {
-
-  try {
-
-    /*
-     * 先確保 FCM token 已完成：
-     *
-     * /device/register
-     *       ↓
-     * DEVICE_VERIFY
-     *       ↓
-     * /device/verify
-     *
-     * 成功後會回傳 verified FCM token
-     */
-    const fcmToken =
-      await ensureFcmVerified()
-
-
-    /*
-     * 將 verified FCM token 傳給後端。
-     *
-     * Backend:
-     *
-     * TempTokenVo {
-     *     private String token;
-     * }
-     */
-    const resp =
-      await apiClient.post(
-        '/auth/tempToken',
-        {
-          token: fcmToken,
-        },
-      )
-
-
-    const token =
-      `Bearer ${resp.data.token}`
-
-
-    // 如果 tempToken API 有回傳 exp，一併更新
-    if (resp.data?.exp) {
-      localStorage.setItem(
-        'tokenExp',
-        resp.data.exp.toString(),
-      )
-    }
-
-
-    return token
-
-  } catch (error) {
-
-    console.error(
-      '[AUTH] Failed to obtain guest token:',
-      error,
-    )
-
-    return null
-  }
-}
-
-
-// Request Interceptor：自動掛上 token，並檢查是否需要 refresh
+/**
+ * ============================================================
+ * Request Interceptor
+ * ============================================================
+ *
+ * 一般 API：
+ * 向 authTokenManager 取得有效 JWT。
+ *
+ * Bootstrap API：
+ * 不執行 JWT 驗證。
+ */
 apiClient.interceptors.request.use(
-
-  async (config) => {
-
-    /*
-     * Authentication bootstrap API 不需要既有 JWT。
-     *
-     * 特別是：
-     *
-     * /device/register
-     * /device/verify
-     * /auth/tempToken
-     *
-     * 否則會發生：
-     *
-     * fetchGuestToken()
-     *   ↓
-     * device/register
-     *   ↓
-     * interceptor
-     *   ↓
-     * fetchGuestToken()
-     *   ↓
-     * ...
-     */
-    if (
-      isAuthBootstrapRequest(
-        config.url,
-      )
-    ) {
+  async (config: InternalAxiosRequestConfig): Promise<InternalAxiosRequestConfig> => {
+    if (isAuthBootstrapRequest(config.url)) {
       return config
     }
 
+    /*
+     * 不再自行：
+     *
+     * localStorage.getItem('authToken')
+     * isTokenExpiringSoon()
+     * fetchGuestToken()
+     *
+     * 全部改由 Token Manager 負責。
+     */
+    const token = await authTokenManager.getValidToken()
 
-    let token =
-      localStorage.getItem(
-        'authToken',
-      )
-
-
-    if (
-      !token
-      ||
-      isTokenExpiringSoon(900)
-    ) {
-
-      // 需要刷新
-      if (
-        !token
-        ||
-        isGuest(token)
-      ) {
-
-        token =
-          await fetchGuestToken()
-
-      } else {
-
-        /*
-         * 目前沿用你原本的邏輯：
-         *
-         * 非 Guest token 過期時，
-         * 也是取得新的 temp token。
-         *
-         * 未來如果會員要使用 refresh token，
-         * 可以在這裡改成不同流程。
-         */
-        token =
-          await fetchGuestToken()
-      }
-
-
-      if (token) {
-        localStorage.setItem(
-          'authToken',
-          token,
-        )
-      }
-    }
-
-
-    if (token) {
-
-      config.headers =
-        config.headers || {}
-
-
-      config.headers[
-        'Authorization'
-      ] = token
-    }
-
+    setAuthorization(config, token)
 
     return config
   },
 
-
-  (error) =>
-    Promise.reject(
-      error instanceof Error
-        ? error
-        : new Error(
-            error?.message ??
-            'Request error',
-          ),
-    ),
+  (error: unknown) => Promise.reject(error),
 )
 
-
-// Response Interceptor：後端主動送 x-refreshed-token 時更新
+/**
+ * ============================================================
+ * Response Interceptor
+ * ============================================================
+ */
 apiClient.interceptors.response.use(
-
   (response) => {
+    /**
+     * 後端可能主動透過 Header
+     * 回傳更新後的 JWT。
+     */
+    const refreshedToken = response.headers['x-refreshed-token']
 
-    const refreshedToken =
-      response.headers[
-        'x-refreshed-token'
-      ]
+    if (typeof refreshedToken === 'string' && refreshedToken.trim()) {
+      const exp = response.data?.exp
 
-
-    const exp =
-      response.data?.exp
-
-
-    if (refreshedToken) {
-
-      localStorage.setItem(
-        'authToken',
-        refreshedToken,
-      )
-
-
-      if (exp) {
-        localStorage.setItem(
-          'tokenExp',
-          exp.toString(),
-        )
-      }
+      authTokenManager.setToken(refreshedToken, exp)
     }
 
-
-    // Login 成功後儲存 accessToken
-    if (
-      response.config.url?.includes(
-        '/auth/login',
-      )
-      &&
-      response.data?.accessToken
-    ) {
-
-      const loginToken =
-        `Bearer ${response.data.accessToken}`
-
-
-      localStorage.setItem(
-        'authToken',
-        loginToken,
-      )
-
-
-      if (exp) {
-        localStorage.setItem(
-          'tokenExp',
-          exp.toString(),
-        )
-      }
+    /**
+     * 會員登入成功後：
+     * 儲存 Access Token。
+     *
+     * 注意：
+     * 不讓一般 Guest Token Refresh
+     * 覆蓋尚未過期的會員 JWT。
+     */
+    if (response.config.url?.includes('/auth/login') && response.data?.accessToken) {
+      authTokenManager.setToken(response.data.accessToken, response.data.exp)
     }
-
 
     return response
   },
 
-
-  async (error) => {
-
-    const originalRequest =
-      error.config
-
-
-    /*
-     * Bootstrap API 如果自己回傳 401，
-     * 不可以再次執行 fetchGuestToken()。
-     *
-     * 例如：
-     *
-     * /auth/tempToken → 401
-     *      ↓
-     * fetchGuestToken()
-     *      ↓
-     * /auth/tempToken
-     *      ↓
-     * 401
-     *      ↓
-     * ...
-     */
-    if (
-      isAuthBootstrapRequest(
-        originalRequest?.url,
-      )
-    ) {
+  /**
+   * ----------------------------------------------------------
+   * 401 錯誤處理
+   * ----------------------------------------------------------
+   */
+  async (error: unknown) => {
+    if (!axios.isAxiosError(error)) {
       return Promise.reject(error)
     }
 
+    const originalRequest = error.config as RetryableRequestConfig | undefined
 
-    if (
-      error.response?.status !== 401
-      ||
-      originalRequest?._retry
-    ) {
-
-      return Promise.reject(
-        error instanceof Error
-          ? error
-          : new Error(
-              error?.message ??
-              'Unhandled request error',
-            ),
-      )
+    /**
+     * Bootstrap API 發生 401：
+     *
+     * 不可以再次要求 Guest JWT。
+     *
+     * 否則 /auth/tempToken 失敗後，
+     * 會不斷呼叫自己。
+     */
+    if (isAuthBootstrapRequest(originalRequest?.url)) {
+      return Promise.reject(error)
     }
 
+    /**
+     * 非 401、缺少 Request Config、
+     * 或已經重試過：
+     *
+     * 直接回傳錯誤。
+     */
+    if (error.response?.status !== 401 || !originalRequest || originalRequest._retry) {
+      return Promise.reject(error)
+    }
 
     originalRequest._retry = true
 
-
-    let token =
-      localStorage.getItem(
-        'authToken',
-      )
-
-
-    if (
-      !token
-      ||
-      isGuest(token)
-    ) {
-
-      token =
-        await fetchGuestToken()
-
-    } else {
-
-      /*
-       * 目前沿用原本邏輯。
+    try {
+      /**
+       * 取得此次遭拒的 JWT。
        *
-       * 未來會員 token 如果有獨立的
-       * refresh API，可以在這裡更換。
+       * 若其他 API 已經先更新成功，
+       * Token Manager 會直接重用新 JWT。
        */
-      token =
-        await fetchGuestToken()
-    }
+      const rejectedToken = AxiosHeaders.from(originalRequest.headers).get('Authorization')
 
-
-    if (token) {
-
-      localStorage.setItem(
-        'authToken',
-        token,
+      const newToken = await authTokenManager.recoverRejectedToken(
+        typeof rejectedToken === 'string' ? rejectedToken : null,
       )
 
+      /**
+       * 使用新 JWT 重送原始 API。
+       */
+      setAuthorization(originalRequest, newToken)
 
-      originalRequest.headers =
-        originalRequest.headers || {}
+      return apiClient(originalRequest)
+    } catch (refreshError: unknown) {
+      console.error('[AUTH] JWT 恢復失敗', refreshError)
 
-
-      originalRequest.headers[
-        'Authorization'
-      ] = token
-
-
-      // 使用新的 token 重送原本的 request
-      return apiClient(
-        originalRequest,
-      )
+      return Promise.reject(refreshError)
     }
-
-
-    return Promise.reject(
-      new Error(
-        'Token refresh failed',
-      ),
-    )
   },
 )
-
 
 export default apiClient
