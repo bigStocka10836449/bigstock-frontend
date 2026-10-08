@@ -1,87 +1,238 @@
+
 @import './base.css';
 
-/* 根容器樣式 */
+/*
+ * ============================================================
+ * BigStock - Main CSS
+ * ============================================================
+ *
+ * 全站結構：
+ *
+ * #app
+ *   ├── Header.vue
+ *   │     └── NewsTicker.vue
+ *   │
+ *   ├── main.app-content
+ *   │     └── RouterView
+ *   │           ├── HomeView.vue
+ *   │           ├── BstockCandlestick.vue
+ *   │           ├── CalendarView.vue
+ *   │           ├── NewsView.vue
+ *   │           └── 其他頁面
+ *   │
+ *   └── NotificationPermissionModal.vue
+ *
+ * 核心原則：
+ *
+ * 1. 網頁可以自然向下延伸。
+ * 2. 不以 100vh 固定整個 App 高度。
+ * 3. 不裁切 RouterView 的內容。
+ * 4. 只有特定模組使用局部捲動。
+ * 5. 不使用全域 .content 控制元件布局。
+ */
+
+/*
+ * ============================================================
+ * App 根容器
+ * ============================================================
+ *
+ * 原本：
+ *
+ * height: 100vh;
+ *
+ * 會將整個網站固定成視窗高度。
+ *
+ * 現在改用 min-height，
+ * 內容很多時可以繼續向下延伸。
+ */
 #app {
-  margin: 0 auto; /* 水平居中 */
-  display: flex; /* 使用 Flexbox 垂直布局 */
-  flex-direction: column; /* 垂直排列 Header 和 main */
-  height: 100vh; /* 占滿螢幕高度 */
+  display: flex;
+  flex-direction: column;
+
+  width: 100%;
+  min-width: 0;
+
+  min-height: 100vh;
+  min-height: 100dvh;
+
+  height: auto;
+
+  margin: 0;
+  padding: 0;
+
+  background-color: var(--color-background);
+  color: var(--color-text);
+
   font-weight: normal;
-  padding: 0; /* 移除內邊距，避免干擾 */
-  background-color: #f9f9f9; /* 統一背景顏色 */
+
+  /*
+   * 不裁切子頁面。
+   */
+  overflow: visible;
 }
 
-/* Header 樣式 */
-header {
-  height: 60px; /* 固定 Header 高度 */
-  background-color: inherit; /* 繼承 #app 的背景顏色 */
-  color: black; /* 調整文字顏色，保證可讀性 */
-  display: flex; /* 垂直和水平居中內容 */
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0; /* 防止 Header 被壓縮 */
+/*
+ * ============================================================
+ * App 頁面容器
+ * ============================================================
+ *
+ * 對應 App.vue：
+ *
+ * <div id="app" class="app-container">
+ *
+ * 使用 min-height 讓整體內容自然延伸。
+ */
+.app-container {
+  display: flex;
+  flex-direction: column;
+
+  width: 100%;
+  min-width: 0;
+  min-height: 100dvh;
 }
 
-/* Main 區域樣式 */
-main {
-  flex-grow: 1; /* 填滿剩餘空間 */
-  display: flex; /* 使用 Flexbox 讓 Content 填滿 main */
-  flex-direction: column; /* 垂直方向布局 */
-  overflow: hidden; /* 防止滾動條干擾 */
-  background-color: inherit; /* 繼承 #app 的背景顏色 */
+/*
+ * ============================================================
+ * Router 主內容
+ * ============================================================
+ *
+ * 對應 App.vue：
+ *
+ * <main class="app-content">
+ *   <RouterView />
+ * </main>
+ *
+ * 不再使用全域：
+ *
+ * main {
+ *   overflow: hidden;
+ * }
+ *
+ * 因為那會導致財經行事曆後面的資料被裁切。
+ */
+#app > main.app-content {
+  /*
+   * 內容不多時，填滿剩餘空間。
+   * 內容很多時，允許向下延伸。
+   */
+  flex: 1 0 auto;
+
+  /*
+   * 使用一般區塊布局。
+   *
+   * 不強制所有 View 的根元素
+   * 都必須成為 Flex 子元素。
+   */
+  display: block;
+
+  width: 100%;
+  min-width: 0;
+
+  height: auto;
+  max-height: none;
+
+  /*
+   * 關鍵修正：
+   * 不再禁止內容垂直延伸。
+   */
+  overflow: visible;
+
+  background-color: inherit;
 }
 
-/* Content 樣式 */
-.content {
-  flex-grow: 1; /* 填滿 main 的高度 */
-  overflow-y: auto; /* 當內容過多時啟用滾動條 */
-  padding: 20px; /* 添加內邊距 */
-  border-top: 1px solid #ccc; /* 添加頂部邊框 */
-  background-color: inherit; /* 繼承 #app 的背景顏色 */
+/*
+ * ============================================================
+ * 全站水平溢出管理
+ * ============================================================
+ *
+ * 防止某個過寬元件造成整頁水平捲動。
+ *
+ * 注意：
+ * 個別表格仍可在自己的容器中
+ * 使用 overflow-x: auto。
+ *
+ * 如果某個元件持續超寬，
+ * 應修正該元件的實際寬度，
+ * 而不是只依賴此設定。
+ */
+html,
+body {
+  overflow-x: clip;
 }
 
-/* 超鏈接樣式 */
+/*
+ * ============================================================
+ * 全站連結
+ * ============================================================
+ *
+ * 保留原本的綠色品牌色。
+ *
+ * 不再給所有連結設定 padding: 3px，
+ * 因為這會干擾 Header 導覽間距、
+ * 新聞標題以及按鈕式連結。
+ *
+ * Header.vue 的 scoped CSS
+ * 可以自行定義導航連結的顏色。
+ */
 a,
 .green {
+  color: var(--color-primary);
+
   text-decoration: none;
-  color: hsla(160, 100%, 37%, 1);
-  transition: 0.4s;
-  padding: 3px;
+
+  transition:
+    color 0.2s ease,
+    opacity 0.2s ease;
 }
 
+/*
+ * ============================================================
+ * 連結 Hover
+ * ============================================================
+ *
+ * 原本 a:hover 會套用綠色背景。
+ *
+ * 現在改為文字變色，
+ * 避免導航列與新聞連結出現
+ * 不預期的綠色背景。
+ */
 @media (hover: hover) {
   a:hover {
-    background-color: hsla(160, 100%, 37%, 0.2);
+    color: var(--color-primary-hover);
   }
 }
 
-/* 響應式設計 (大於 1024px 時) */
-@media (min-width: 1024px) {
-  body {
-    display: flex; /* 使用 Flexbox 將內容居中 */
-    place-items: center; /* 水平和垂直居中 */
-  }
-
-  #app {
-    display: flex; /* 使用 Flexbox */
-    flex-direction: column; /* 垂直排列 Header 和 main */
-    height: 100vh; /* 填滿整個屏幕高度 */
+/*
+ * ============================================================
+ * 響應式設計
+ * ============================================================
+ *
+ * 不再於桌面版設定：
+ *
+ * body {
+ *   display: flex;
+ *   place-items: center;
+ * }
+ *
+ * 因為這會干擾全寬網站布局。
+ */
+@media (max-width: 768px) {
+  #app,
+  .app-container,
+  #app > main.app-content {
     width: 100%;
-    padding: 0; /* 移除多餘內邊距 */
-    background-color: #0c0606; /* 保持背景顏色一致 */
+    min-width: 0;
   }
+}
 
-  main {
-    flex-grow: 1; /* 填滿剩餘高度 */
-    display: flex; /* 保持 Content 區域能夠填滿 */
-    flex-direction: column; /* 垂直方向布局 */
-    width: 100%; /* 確保內容區域寬度與父容器一致 */
-    background-color: inherit; /* 繼承 #app 的背景顏色 */
-  }
-
-  .content {
-    flex-grow: 1; /* 填滿 main 的剩餘高度 */
-    overflow-y: auto; /* 當內容超出可滾動 */
-    background-color: inherit; /* 繼承 #app 的背景顏色 */
+/*
+ * ============================================================
+ * 尊重減少動畫偏好
+ * ============================================================
+ */
+@media (prefers-reduced-motion: reduce) {
+  a,
+  .green {
+    transition: none;
   }
 }

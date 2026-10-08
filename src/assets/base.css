@@ -1,4 +1,28 @@
-/* color palette from <https://github.com/vuejs/theme> */
+
+/*
+ * ============================================================
+ * BigStock - Base CSS
+ * ============================================================
+ *
+ * 此檔案負責：
+ *
+ * 1. 全站色彩變數
+ * 2. CSS Reset
+ * 3. 字型與文字渲染
+ * 4. 基本瀏覽器設定
+ *
+ * 不在此檔案控制 Header、Sidebar、
+ * CalendarView 或其他元件的 Layout。
+ */
+
+/*
+ * ============================================================
+ * 基礎色彩
+ * ============================================================
+ *
+ * 保留原本 Vue 色彩命名，
+ * 避免其他舊元件引用時出現問題。
+ */
 :root {
   --vt-c-white: #ffffff;
   --vt-c-white-soft: #f8f8f8;
@@ -21,51 +45,110 @@
   --vt-c-text-dark-2: rgba(235, 235, 235, 0.64);
 }
 
-/* semantic color variables for this project */
+/*
+ * ============================================================
+ * BigStock 語意色彩
+ * ============================================================
+ *
+ * 目前 BigStock 主要採用深色主題，
+ * 因此不再讓作業系統的淺色模式
+ * 自動將網站背景切換成白色。
+ *
+ * 如果未來要做淺色／深色切換，
+ * 可以額外加入 data-theme。
+ */
 :root {
-  --color-background: var(--vt-c-white);
-  --color-background-soft: var(--vt-c-white-soft);
-  --color-background-mute: var(--vt-c-white-mute);
+  color-scheme: dark;
 
-  --color-border: var(--vt-c-divider-light-2);
-  --color-border-hover: var(--vt-c-divider-light-1);
+  --color-background: #151515;
+  --color-background-soft: #222222;
+  --color-background-mute: #2c2c2c;
 
-  --color-heading: var(--vt-c-text-light-1);
-  --color-text: var(--vt-c-text-light-1);
+  --color-border: rgba(255, 255, 255, 0.12);
+  --color-border-hover: rgba(255, 255, 255, 0.25);
+
+  --color-heading: #f1f5f9;
+  --color-text: #e2e8f0;
+  --color-text-muted: #94a3b8;
+
+  --color-primary: #4caf50;
+  --color-primary-hover: #66bb6a;
 
   --section-gap: 160px;
+
+  /*
+   * Header 高度預估值。
+   *
+   * 供需要設定 max-height 的 Sidebar
+   * 與 FilterResults 使用。
+   *
+   * 這不是固定 Header 高度的指令。
+   */
+  --bigstock-header-height: 110px;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --color-background: var(--vt-c-black);
-    --color-background-soft: var(--vt-c-black-soft);
-    --color-background-mute: var(--vt-c-black-mute);
-
-    --color-border: var(--vt-c-divider-dark-2);
-    --color-border-hover: var(--vt-c-divider-dark-1);
-
-    --color-heading: var(--vt-c-text-dark-1);
-    --color-text: var(--vt-c-text-dark-2);
-  }
-}
-
+/*
+ * ============================================================
+ * CSS Reset
+ * ============================================================
+ *
+ * 所有元素統一使用 border-box，
+ * 避免 Padding 與 Border 把元件撐寬。
+ *
+ * 不再使用全域 font-weight: normal，
+ * 因為原本的寫法會影響 h1、strong 等元素。
+ */
 *,
 *::before,
 *::after {
   box-sizing: border-box;
-  margin: 0;
-  font-weight: normal;
 }
 
+/*
+ * ============================================================
+ * HTML
+ * ============================================================
+ *
+ * 使用深色背景。
+ *
+ * 不設定固定高度，
+ * 允許內容自然往下延伸。
+ */
+html {
+  width: 100%;
+  min-height: 100%;
+
+  background-color: var(--color-background);
+
+  /*
+   * 允許程式化的錨點跳轉平滑移動。
+   */
+  scroll-behavior: smooth;
+}
+
+/*
+ * ============================================================
+ * Body
+ * ============================================================
+ *
+ * 保留原本的字型與文字渲染設定。
+ *
+ * 不使用 display:flex 或 place-items:center，
+ * 因為現在是多頁面網站，而不是置中展示頁。
+ */
 body {
+  margin: 0;
+  padding: 0;
+
+  width: 100%;
   min-height: 100vh;
+  min-height: 100dvh;
+
   color: var(--color-text);
-  background: var(--color-background);
-  transition:
-    color 0.5s,
-    background-color 0.5s;
+  background-color: var(--color-background);
+
   line-height: 1.6;
+
   font-family:
     Inter,
     -apple-system,
@@ -79,8 +162,71 @@ body {
     'Droid Sans',
     'Helvetica Neue',
     sans-serif;
+
   font-size: 15px;
+
   text-rendering: optimizeLegibility;
+
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+
+  /*
+   * 不設定 overflow-y: hidden。
+   *
+   * 財經行事曆、新聞列表等內容增加時，
+   * 由整個瀏覽器頁面負責垂直捲動。
+   */
+}
+
+/*
+ * ============================================================
+ * 防止過寬的媒體元素
+ * ============================================================
+ *
+ * 圖片與影片不超過父容器。
+ *
+ * 不在這裡修改 Canvas：
+ * ECharts 需由圖表元件自己控制尺寸。
+ */
+img,
+video {
+  max-width: 100%;
+}
+
+/*
+ * ============================================================
+ * 表單字型
+ * ============================================================
+ *
+ * 避免 input、button、select 等
+ * 使用與網站不同的瀏覽器預設字型。
+ */
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+/*
+ * ============================================================
+ * 無障礙焦點
+ * ============================================================
+ *
+ * 鍵盤操作時提供清楚的焦點提示。
+ */
+:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+/*
+ * ============================================================
+ * 使用者減少動畫偏好
+ * ============================================================
+ */
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
 }

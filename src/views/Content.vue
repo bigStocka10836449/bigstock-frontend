@@ -6,26 +6,25 @@
 </template>
 
 <script>
+  import Candlestick from './BstockCandlestick.vue'
 
-import Candlestick from './BstockCandlestick.vue';
-
-export default {
-  props: {
-    currentComponent: {
-      type: String,
-      required: true,
+  export default {
+    props: {
+      currentComponent: {
+        type: String,
+        required: true,
+      },
     },
-  },
-  components: {
-    Candlestick,
-  },
-};
+    components: {
+      Candlestick,
+    },
+  }
 </script>
 
 <style>
-.content {
-  flex-grow: 1; /* 填滿剩餘空間 */
-  flex-direction: column;
-  overflow: auto; /* 內容過多時允許滾動 */
-}
+  .content {
+    flex-grow: 1; /* 填滿剩餘空間 */
+    flex-direction: column;
+    overflow: auto; /* 內容過多時允許滾動 */
+  }
 </style>

@@ -1,75 +1,36 @@
 <template>
-  <div class="header">
-    <button @click="selectView('Candlestick')" class="login-btn">candlestick</button>
+  <header class="site-header">
+    <div class="header-main">
+      <!-- 首頁入口；移除畫面上的會員登入／登出，但不修改 FCM Guest JWT 驗證。 -->
+      <RouterLink to="/" class="brand">BigStock</RouterLink>
 
-    <!-- 已登入 -->
-    <div v-if="props.user.isLogin" class="user-info">
-      <span>歡迎, {{ props.user.name }}</span>
-      <div @click="userLogOut" class="login-btn"><span>登出</span></div>
+      <!-- 全站路由選單，手機可左右捲動。 -->
+      <nav class="nav-menu" aria-label="網站主要導覽">
+        <RouterLink to="/">首頁</RouterLink>
+        <RouterLink to="/candlestick">K 線圖</RouterLink>
+        <RouterLink to="/industries">產業分類</RouterLink>
+        <RouterLink to="/calendar">財經行事曆</RouterLink>
+        <RouterLink to="/market-live">即時市場</RouterLink>
+        <RouterLink to="/news">新聞快訊</RouterLink>
+      </nav>
     </div>
 
-    <!-- 未登入 -->
-    <div v-else @click="openLoginPopup" class="login-btn"><span>登入</span></div>
-  </div>
+    <!-- Header 始終掛載同一個跑馬燈元件。 -->
+    <NewsTicker />
+  </header>
 </template>
 
-<script lang="ts" setup>
-  import { ref } from 'vue'
-
-  const props = defineProps<{
-    user: {
-      loginToken: string
-      name: string
-      isLogin: boolean
-    }
-  }>()
-  const emit = defineEmits<{
-    (event: 'update-view', view: string): void
-    (event: 'toggle-login-popup', isOpen: boolean): void
-    (event: 'logout', isLogout: boolean): void
-  }>()
-
-  // 當前頁籤：login or register
-  const currentTab = ref<'login' | 'register'>('login')
-
-  function selectView(view: string) {
-    emit('update-view', view)
-  }
-
-  function openLoginPopup() {
-    emit('toggle-login-popup', true)
-  }
-
-  function userLogOut() {
-    emit('logout', true)
-  }
+<script setup lang="ts">
+import NewsTicker from '@/components/layout/NewsTicker.vue'
 </script>
 
-<style>
-  .header {
-    display: flex;
-    justify-content: space-around;
-    align-items: center;
-    background-color: #333;
-    padding: 10px;
-    color: white;
-    height: 50px; /* 固定高度 */
-  }
-
-  .login-btn {
-    cursor: pointer;
-    padding: 5px 10px;
-    border: 1px solid white;
-    border-radius: 4px;
-    transition:
-      background-color 0.3s,
-      color 0.3s;
-  }
-
-  .login-btn:hover,
-  .login-btn:focus {
-    background-color: white;
-    color: black;
-    outline: none;
-  }
+<style scoped>
+.site-header { display: flex; flex-direction: column; width: 100%; background: #24292f; color: #fff; }
+.header-main { display: flex; align-items: center; gap: 40px; min-height: 58px; padding: 0 24px; box-sizing: border-box; }
+.brand { color: #65c995; text-decoration: none; font-size: 23px; font-weight: 700; white-space: nowrap; }
+.nav-menu { display: flex; align-items: center; gap: 24px; flex: 1; min-width: 0; }
+.nav-menu a { color: #c5cbd3; text-decoration: none; font-size: 14px; white-space: nowrap; }
+.nav-menu a:hover { color: #fff; }
+.nav-menu a.router-link-exact-active { color: #65c995; font-weight: 700; }
+@media (max-width: 850px) { .header-main { flex-wrap: wrap; gap: 12px; padding: 12px 16px; } .nav-menu { width: 100%; flex-basis: 100%; gap: 20px; overflow-x: auto; padding-bottom: 4px; } .nav-menu a { font-size: 13px; } }
 </style>
