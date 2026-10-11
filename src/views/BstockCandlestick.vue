@@ -59,6 +59,8 @@
           </div>
           <div v-else class="data-status">請先選擇股票以查看資券資料</div>
         </section>
+        <!-- K 線頁下方的基本面資料，不影響既有 Sidebar / K 線 / 資券元件 -->
+        <StockFundamentals v-if="loadedStockCode" :stock-code="loadedStockCode" />
       </div>
     </div>
   </div>
@@ -68,18 +70,20 @@
 import Candlestick from '../components/bstock/Candlestick.vue'
 import StockInfoChart from '../components/bstock/StockInfoChart.vue'
 import FilterResults from '../components/bstock/FilterResults.vue'
+import StockFundamentals from './StockFundamentals.vue'
 import Sidebar from '../components/bstock/Sidebar.vue'
 import { getSingleStockPrice, getStockMarginShortInfo, getStockCodeByFilter } from '@/api/stockApi'
 
 export default {
   name: 'BstockCandlestick',
-  components: { Sidebar, FilterResults, Candlestick, StockInfoChart },
+  components: { Sidebar, FilterResults, Candlestick, StockInfoChart, StockFundamentals },
   data() {
     return {
       filters: null, // 儲存篩選條件
       results: [], // 查詢結果
       shouldShowResults: false, // 控制 FilterResults 展開
-      selectedStockCode: '', // 選中的股票代碼
+      selectedStockCode: '', // 股票輸入框
+      loadedStockCode: '', // 已確定查詢的代號
       stockData: null, // 股票價格數據
       stockMarginShortData: null, // 資券數據
       isKLineChart: true,
@@ -90,6 +94,15 @@ export default {
       stockRequestVersion: 0, // 防止慢速舊請求覆蓋新股票資料
       filterRequestVersion: 0, // 防止慢速舊篩選覆蓋新結果
     }
+  },
+  watch: {
+    '$route.query.stockCode': {
+      immediate: true,
+      handler(value) {
+        const code = typeof value === 'string' ? value.trim() : ''
+        if (code && code !== this.loadedStockCode) this.handleSelectStock(code)
+      },
+    },
   },
   methods: {
     switchTab(tab) {
@@ -153,6 +166,8 @@ export default {
       const code = String(stockCode ?? '').trim()
       if (!code) return
       this.selectedStockCode = code
+      this.loadedStockCode = code
+      this.isKLineChart = true
       this.stockData = null
       this.stockMarginShortData = null
       this.stockError = ''

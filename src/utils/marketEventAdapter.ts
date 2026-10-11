@@ -1,61 +1,483 @@
+
+import type {
+  MarketEvent,
+  MarketTopic,
+} from '@/types/market'
+
 /**
- * 既有 MarketEvent 型別目前未提供，所以獨立處理 WebSocket Payload。
- * 不推測 MarketSnapshot.ts/sp500/nasdaq/dow 必定有值：後端可能只 setData(raw JSON)。
- * 如果現有 marketParser.ts 已解析出價格，將相應欄位加入此 adapter 即可。
+ * ============================================================
+ * BigStock - Market Event Adapter
+ * ============================================================
+ *
+ * 將 WebSocket MarketEvent 轉成統一的 LiveQuote。
+ *
+ * 資料流程：
+ *
+ * WebSocket STOMP Message
+ *        ↓
+ * marketParser.ts
+ *        ↓
+ * MarketEvent
+ *        ↓
+ * marketEventAdapter.ts
+ *        ↓
+ * LiveQuote
+ *        ↓
+ * marketStore.ts
+ *        ↓
+ * MarketLiveView.vue
+ *
+ * 注意：
+ * 後端 MarketSnapshot 的 sp500/nasdaq/dow
+ * 可能沒有賦值，預設為 0。
+ *
+ * 真正的市場資料應優先從
+ * event.rawMarketData 取得。
+ */
+
+/**
+ * 前端統一的即時報價格式。
  */
 export interface LiveQuote {
   symbol: string
+
   price: number | null
+
   change: number | null
+
   changePercent: number | null
+
   updatedAt: number | null
+
   title?: string
 }
-const rec = (x: unknown): x is Record<string, unknown> => x !== null && typeof x === 'object' && !Array.isArray(x)
-function unwrap(x: unknown): unknown {
-  let v = x
-  for (let i = 0; i < 4 && typeof v === 'string'; i++) {
-    try { v = JSON.parse(v) } catch { break }
-  }
-  return v
+
+/**
+ * ============================================================
+ * STOMP Topic -> 市場代碼
+ * ============================================================
+ *
+ * 依目前前端定義的 MARKET_TOPICS 對應。
+ *
+ * 注意：
+ * 台灣兩個 Topic 的對應暫定如下，
+ * 需與後端實際發送內容確認。
+ */
+const TOPIC_SYMBOL_MAP: Record<MarketTopic, string> = {
+  '/topic/marketTWPM': 'WTX00',
+
+  '/topic/marketTWPMN': 'WTX&',
+
+  '/topic/marketNASDAQ_F': 'MNQ=F',
+
+  '/topic/marketS_P_500_F': 'MES=F',
+
+  '/topic/marketDOW_JONES_F': 'MYM=F',
+
+  '/topic/marketPHLX_SEMICONDUCTOR_SECTOR': '^SOX',
 }
-function number(x: unknown): number | null {
-  if (typeof x === 'number' && Number.isFinite(x)) return x
-  if (typeof x === 'string' && x.trim() !== '' && x !== '-') {
-    const n = Number(x.replace(/,/g, '').replace('%', ''))
-    return Number.isFinite(n) ? n : null
+
+/**
+ * 判斷是否為一般物件。
+ */
+function isRecord(
+  value: unknown,
+): value is Record<string, unknown> {
+  return (
+    value !== null &&
+    typeof value === 'object' &&
+    !Array.isArray(value)
+  )
+}
+
+/**
+ * 解析可能被多層 JSON 字串包裝的資料。
+ */
+function unwrapJson(value: unknown): unknown {
+  let current = value
+
+  for (let i = 0; i < 5; i++) {
+    if (typeof current !== 'string') {
+      break
+    }
+
+    try {
+      current = JSON.parse(current)
+    } catch {
+      break
+    }
   }
+
+  return current
+}
+
+/**
+ * 將 number 或數字字串轉換為 number。
+ */
+function toNumber(value: unknown): number | null {
+  if (
+    typeof value === 'number' &&
+    Number.isFinite(value)
+  ) {
+    return value
+  }
+
+  if (
+    typeof value === 'string' &&
+    value.trim() !== '' &&
+    value.trim() !== '-'
+  ) {
+    const normalized = value
+      .replace(/,/g, '')
+      .replace(/%/g, '')
+      .trim()
+
+    const parsed = Number(normalized)
+
+    return Number.isFinite(parsed)
+      ? parsed
+      : null
+  }
+
   return null
 }
-function nonzero(x: unknown): number | null {
-  const n = number(x)
-  return n === 0 ? null : n // MarketSnapshot 未賦值欄位預設 0，不能視為有效報價
+
+/**
+ * 時間戳記轉換成 milliseconds。
+ *
+ * 支援：
+ * - Unix seconds
+ * - Unix milliseconds
+ * - ISO 日期字串
+ */
+function toTimestamp(value: unknown): number | null {
+  if (
+    typeof value === 'string' &&
+    value.trim() !== '' &&
+    Number.isNaN(Number(value))
+  ) {
+    const parsed = Date.parse(value)
+
+    return Number.isFinite(parsed)
+      ? parsed
+      : null
+  }
+
+  const numeric = toNumber(value)
+
+  if (
+    numeric === null ||
+    numeric <= 0
+  ) {
+    return null
+  }
+
+  return numeric < 1e11
+    ? numeric * 1000
+    : numeric
 }
-function findValues(x: unknown, depth = 0): Record<string, unknown>[] {
-  if (depth > 5) return []
-  const v = unwrap(x)
-  if (Array.isArray(v)) return v.flatMap((item) => findValues(item, depth + 1))
-  if (!rec(v)) return []
-  return [v, ...['data','quote','chart','result','marketData','payload'].flatMap((key) => key in v ? findValues(v[key], depth + 1) : [])]
+
+/**
+ * 將巢狀市場資料展開成可搜尋的物件。
+ *
+ * 例如 Yahoo：
+ *
+ * {
+ *   chart: {
+ *     result: [
+ *       {
+ *         meta: {
+ *           regularMarketPrice: 123
+ *         }
+ *       }
+ *     ]
+ *   }
+ * }
+ *
+ * 同時支援：
+ * - chart
+ * - result
+ * - meta
+ * - quote
+ * - data
+ * - payload
+ * - marketData
+ */
+function collectObjects(
+  value: unknown,
+  depth = 0,
+): Record<string, unknown>[] {
+  if (depth > 6) {
+    return []
+  }
+
+  const normalized = unwrapJson(value)
+
+  if (Array.isArray(normalized)) {
+    return normalized.flatMap((item) =>
+      collectObjects(item, depth + 1),
+    )
+  }
+
+  if (!isRecord(normalized)) {
+    return []
+  }
+
+  const result: Record<string, unknown>[] = [
+    normalized,
+  ]
+
+  const nestedKeys = [
+    'chart',
+    'result',
+    'meta',
+    'quote',
+    'data',
+    'payload',
+    'marketData',
+  ]
+
+  for (const key of nestedKeys) {
+    if (key in normalized) {
+      result.push(
+        ...collectObjects(
+          normalized[key],
+          depth + 1,
+        ),
+      )
+    }
+  }
+
+  return result
 }
-function field(rows: Record<string, unknown>[], keys: string[]): unknown {
-  for (const row of rows) for (const key of keys) if (row[key] !== undefined && row[key] !== null) return row[key]
-  return undefined
+
+/**
+ * 從候選物件中取得第一個有效數字。
+ */
+function findNumber(
+  rows: Record<string, unknown>[],
+  keys: string[],
+): number | null {
+  for (const row of rows) {
+    for (const key of keys) {
+      const parsed = toNumber(row[key])
+
+      if (parsed !== null) {
+        return parsed
+      }
+    }
+  }
+
+  return null
 }
-const SYMBOLS = ['^SOX', 'MES=F', 'MYM=F', 'MNQ=F', 'WTX00', 'WTX&'] as const
-export function adaptMarketEvent(event: unknown): LiveQuote | null {
-  const rows = findValues(event)
-  const rawTopic = String(field(rows, ['topic','destination']) ?? '')
-  const rawSymbol = String(field(rows, ['symbol','stockCode','code','market','ticker']) ?? '')
-  const symbol = SYMBOLS.find(s => s === rawSymbol || rawTopic.includes(s))
-  if (!symbol) return null
-  const price = nonzero(field(rows, ['price', 'regularMarketPrice', 'lastPrice', 'last', 'currentPrice', 'close']))
-  const change = number(field(rows, ['change','regularMarketChange','fulldayChange']))
-  const changePercent = number(field(rows, ['changePercent','regularMarketChangePercent','fulldayChangePercent']))
-  const ts = field(rows, ['ts','timestamp','regularMarketTime'])
-  const timestamp = number(ts)
-  const updatedAt = timestamp === null || timestamp === 0 ? null : timestamp < 100000000000 ? timestamp * 1000 : timestamp
-  // 沒有辨認出任何即時價格欄位就不顯示，避免假資料。
-  if (price === null) return null
-  return { symbol, price, change, changePercent, updatedAt }
+
+/**
+ * 取得第一個非空字串。
+ */
+function findString(
+  rows: Record<string, unknown>[],
+  keys: string[],
+): string | null {
+  for (const row of rows) {
+    for (const key of keys) {
+      const value = row[key]
+
+      if (
+        typeof value === 'string' &&
+        value.trim() !== ''
+      ) {
+        return value.trim()
+      }
+    }
+  }
+
+  return null
+}
+
+/**
+ * 防止未初始化欄位的 0
+ * 被錯誤當成有效市場報價。
+ */
+function validPrice(
+  value: number | null,
+): number | null {
+  if (
+    value === null ||
+    value <= 0
+  ) {
+    return null
+  }
+
+  return value
+}
+
+/**
+ * ============================================================
+ * MarketEvent -> LiveQuote
+ * ============================================================
+ */
+export function adaptMarketEvent(
+  event: MarketEvent,
+): LiveQuote | null {
+
+  /**
+   * ----------------------------------------------------------
+   * 1. 根據 STOMP Topic 辨識市場
+   * ----------------------------------------------------------
+   */
+  const symbol =
+    TOPIC_SYMBOL_MAP[event.topic]
+
+  if (!symbol) {
+    console.warn(
+      '[MarketAdapter] 未知的市場 Topic',
+      event.topic,
+    )
+
+    return null
+  }
+
+  /**
+   * ----------------------------------------------------------
+   * 2. 解析原始行情資料
+   * ----------------------------------------------------------
+   *
+   * marketParser.ts 已經解析 MarketSnapshot.data。
+   *
+   * 因此直接使用 rawMarketData，
+   * 不需要重新解析外層 MarketSnapshot。
+   */
+  const rows = collectObjects(
+    event.rawMarketData,
+  )
+
+  /**
+   * ----------------------------------------------------------
+   * 3. 取得即時成交價
+   * ----------------------------------------------------------
+   *
+   * 依序嘗試：
+   *
+   * Yahoo：
+   * regularMarketPrice
+   *
+   * 其他市場：
+   * price / lastPrice / currentPrice / last
+   */
+  const price = validPrice(
+    findNumber(rows, [
+      'regularMarketPrice',
+      'price',
+      'lastPrice',
+      'currentPrice',
+      'fulldayPrice',
+      'last',
+    ]),
+  )
+
+  /**
+   * 沒有有效報價：
+   * 不更新市場行情。
+   */
+  if (price === null) {
+    return null
+  }
+
+  /**
+   * ----------------------------------------------------------
+   * 4. 取得漲跌點數
+   * ----------------------------------------------------------
+   */
+  let change = findNumber(rows, [
+    'regularMarketChange',
+    'fulldayChange',
+    'change',
+  ])
+
+  /**
+   * ----------------------------------------------------------
+   * 5. 取得漲跌幅
+   * ----------------------------------------------------------
+   *
+   * 例如：
+   * -0.85 代表 -0.85%
+   */
+  let changePercent = findNumber(rows, [
+    'regularMarketChangePercent',
+    'fulldayChangePercent',
+    'changePercent',
+  ])
+
+  /**
+   * ----------------------------------------------------------
+   * 6. 沒有漲跌資料時，嘗試以昨收計算
+   * ----------------------------------------------------------
+   */
+  const previousClose = findNumber(rows, [
+    'previousClose',
+  ])
+
+  if (
+    change === null &&
+    previousClose !== null &&
+    previousClose !== 0
+  ) {
+    change = price - previousClose
+  }
+
+  if (
+    changePercent === null &&
+    previousClose !== null &&
+    previousClose !== 0
+  ) {
+    changePercent =
+      ((price - previousClose) / previousClose) * 100
+  }
+
+  /**
+   * ----------------------------------------------------------
+   * 7. 解析行情更新時間
+   * ----------------------------------------------------------
+   */
+  const updatedAt =
+    toTimestamp(
+      findNumber(rows, [
+        'regularMarketTime',
+        'timestamp',
+        'ts',
+      ]),
+    ) ??
+    toTimestamp(
+      findString(rows, [
+        'refreshedTs',
+        'datetime',
+        'time',
+      ]),
+    ) ??
+    event.receivedAt
+
+  /**
+   * ----------------------------------------------------------
+   * 8. 取得市場名稱
+   * ----------------------------------------------------------
+   */
+  const title = findString(rows, [
+    'shortName',
+    'longName',
+    'name',
+  ])
+
+  /**
+   * ----------------------------------------------------------
+   * 9. 回傳統一的即時報價
+   * ----------------------------------------------------------
+   */
+  return {
+    symbol,
+    price,
+    change,
+    changePercent,
+    updatedAt,
+    title: title ?? undefined,
+  }
 }

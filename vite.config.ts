@@ -1,383 +1,292 @@
-import { fileURLToPath, URL } from 'node:url';
-import { resolve } from 'node:path';
-import { build as viteBuild, defineConfig, loadEnv, type Plugin } from 'vite';
-import { build as esbuild } from 'esbuild';
-import vue from '@vitejs/plugin-vue';
-import vueDevTools from 'vite-plugin-vue-devtools';
+import { fileURLToPath, URL } from 'node:url'
+import { resolve } from 'node:path'
 
+import { build as viteBuild, defineConfig, loadEnv, type Plugin } from 'vite'
 
+import { build as esbuild } from 'esbuild'
+
+import vue from '@vitejs/plugin-vue'
+import vueDevTools from 'vite-plugin-vue-devtools'
 
 /**
+ * ============================================================
  * Firebase Messaging Service Worker Plugin
+ * ============================================================
  *
- * 用途：
- *
- * 開發環境：
+ * Development:
  *
  * src/firebase/firebase-messaging-sw.ts
- *              ↓
- *           esbuild
- *              ↓
+ *         ↓ esbuild
  * /firebase-messaging-sw.js
  *
- *
- * 正式環境：
+ * Production:
  *
  * src/firebase/firebase-messaging-sw.ts
- *              ↓
- *        Vite / Rollup
- *              ↓
+ *         ↓ Vite Build
  * dist/firebase-messaging-sw.js
  *
- *
- * 這樣可以讓 Service Worker 繼續：
- *
- * 1. 使用 TypeScript
- * 2. import Firebase SDK
- * 3. 使用 import.meta.env
- *
- * 同時不需要在 public 目錄維護另一份 JS。
+ * 保留：
+ * - TypeScript Service Worker
+ * - Firebase SDK Imports
+ * - import.meta.env
+ * - 單獨的 Service Worker Bundle
  */
-function firebaseMessagingServiceWorkerPlugin(
-  mode: string,
-  env: Record<string, string>,
-): Plugin {
-
-  // Firebase Messaging Service Worker 原始檔案
-  const serviceWorkerEntry = resolve(
-    process.cwd(),
-    'src/firebase/firebase-messaging-sw.ts',
-  );
-
+function firebaseMessagingServiceWorkerPlugin(mode: string, env: Record<string, string>): Plugin {
+  const serviceWorkerEntry = resolve(process.cwd(), 'src/firebase/firebase-messaging-sw.ts')
 
   /**
-   * 將 Vite 環境變數轉成 esbuild 可以直接替換的格式。
-   *
-   * 例如：
-   *
-   * import.meta.env.VITE_FIREBASE_API_KEY
-   *
-   * 會在 bundle 時直接變成實際的字串值。
+   * 將 VITE_* 環境變數轉成 esbuild define。
    */
-  const defineEnv: Record<string, string> = {};
+  const defineEnv: Record<string, string> = {}
 
-  for (
-    const [key, value]
-    of Object.entries(env)
-  ) {
-
-    if (
-      key.startsWith('VITE_')
-    ) {
-
-      defineEnv[
-        `import.meta.env.${key}`
-      ] = JSON.stringify(value);
+  for (const [key, value] of Object.entries(env)) {
+    if (key.startsWith('VITE_')) {
+      defineEnv[`import.meta.env.${key}`] = JSON.stringify(value)
     }
   }
 
-
   return {
-
-    name:
-      'firebase-messaging-service-worker',
-
+    name: 'firebase-messaging-service-worker',
 
     /**
-     * 開發環境處理。
+     * --------------------------------------------------------
+     * Development
+     * --------------------------------------------------------
      *
-     * Firebase 預設會要求：
-     *
+     * 動態處理：
      * /firebase-messaging-sw.js
-     *
-     * 這裡直接攔截該 request，
-     * 使用 esbuild 將 TypeScript Service Worker
-     * bundle 成一個完整 JavaScript 檔案。
-     *
-     * 注意：
-     *
-     * 這裡不再呼叫第二次 Vite build，
-     * 避免干擾目前正在執行的 Vite Dev Server / HMR。
      */
     configureServer(server) {
-
       server.middlewares.use(
         '/firebase-messaging-sw.js',
 
-        async (
-          _req,
-          res,
-          next,
-        ) => {
-
+        async (_req, res, next) => {
           try {
+            const result = await esbuild({
+              entryPoints: [serviceWorkerEntry],
 
-            const result =
-              await esbuild({
+              write: false,
 
-                // Service Worker 原始檔
-                entryPoints: [
-                  serviceWorkerEntry,
-                ],
+              bundle: true,
 
-                // 不輸出實體檔案，
-                // 直接取得編譯結果並回傳給瀏覽器
-                write: false,
+              platform: 'browser',
 
-                // 將 Firebase SDK 等 dependency
-                // 全部 bundle 到同一個 Service Worker
-                bundle: true,
+              format: 'iife',
 
-                // Service Worker 執行於瀏覽器環境
-                platform: 'browser',
+              target: 'es2020',
 
-                // 輸出一般 JavaScript，
-                // 避免 Service Worker 再依賴 Vite module
-                format: 'iife',
+              define: {
+                ...defineEnv,
+                global: 'globalThis',
+              },
 
-                // 現代瀏覽器即可
-                target: 'es2020',
+              sourcemap: 'inline',
+            })
 
-                // 將 import.meta.env.VITE_*
-                // 替換成目前 development mode 的實際值
-                define: defineEnv,
-
-                // 產生 source map，
-                // 方便開發環境除錯
-                sourcemap: 'inline',
-              });
-
-
-            const outputFile =
-              result.outputFiles?.[0];
-
+            const outputFile = result.outputFiles?.[0]
 
             if (!outputFile) {
-
-              throw new Error(
-                'Firebase Messaging Service Worker build produced no output.',
-              );
+              throw new Error('Firebase Service Worker build produced no output.')
             }
 
+            res.statusCode = 200
 
-            // Service Worker 正常回傳
-            res.statusCode = 200;
+            res.setHeader('Content-Type', 'application/javascript; charset=utf-8')
 
+            res.setHeader('Service-Worker-Allowed', '/')
 
-            /**
-             * 非常重要：
-             *
-             * 必須回傳 JavaScript MIME Type，
-             * 不能再讓 Vite fallback 成 text/html。
-             */
-            res.setHeader(
-              'Content-Type',
-              'application/javascript; charset=utf-8',
-            );
+            res.setHeader('Cache-Control', 'no-store')
 
-
-            /**
-             * 允許 Service Worker 控制網站根目錄。
-             */
-            res.setHeader(
-              'Service-Worker-Allowed',
-              '/',
-            );
-
-
-            /**
-             * 開發環境不要 cache Service Worker，
-             * 避免修改程式後瀏覽器仍使用舊版本。
-             */
-            res.setHeader(
-              'Cache-Control',
-              'no-store',
-            );
-
-
-            // 回傳 bundle 完成的 Service Worker
-            res.end(
-              outputFile.contents,
-            );
-
+            res.end(outputFile.contents)
           } catch (error) {
+            console.error('[FCM] Service Worker build failed:', error)
 
-            console.error(
-              '[FCM] Service Worker build failed:',
-              error,
-            );
-
-
-            next(error);
+            next(error)
           }
         },
-      );
+      )
     },
 
-
     /**
-     * 正式環境 Build。
+     * --------------------------------------------------------
+     * Production
+     * --------------------------------------------------------
      *
-     * 保留原本的設計：
-     *
-     * src/firebase/firebase-messaging-sw.ts
-     *
-     * ↓
-     *
-     * dist/firebase-messaging-sw.js
+     * Vue 主程式 Build 完成後，
+     * 再將 Firebase Messaging Service Worker
+     * 打包至 dist 根目錄。
      */
     async closeBundle() {
-
       await viteBuild({
-
-        // 不重新讀取目前的 vite.config.ts，
-        // 避免 Plugin 遞迴執行自己
         configFile: false,
 
         mode,
 
         publicDir: false,
 
+        /**
+         * 此設定是獨立的第二次 Vite Build。
+         *
+         * 不會自動繼承外層 Vite define。
+         */
+        define: {
+          global: 'globalThis',
+        },
 
         build: {
-
-          // 不清空 dist，
-          // 因為 Vue 主程式已經 build 完成
           emptyOutDir: false,
 
+          outDir: resolve(process.cwd(), 'dist'),
 
           lib: {
+            entry: serviceWorkerEntry,
 
-            // Firebase Messaging Service Worker
-            entry:
-              serviceWorkerEntry,
+            formats: ['es'],
 
-            // 正式環境輸出 ES JavaScript
-            formats: [
-              'es',
-            ],
-
-            // Firebase 預設尋找的檔名
-            fileName:
-              () =>
-                'firebase-messaging-sw.js',
+            fileName: () => 'firebase-messaging-sw.js',
           },
 
-
-          // 輸出到正式 Vue build 的 dist
-          outDir:
-            resolve(
-              process.cwd(),
-              'dist',
-            ),
-
-
           rollupOptions: {
-
             output: {
-
-              // 將 dependency 全部打包在同一個檔案，
-              // 避免 Service Worker 還需要額外載入 chunk
-              inlineDynamicImports:
-                true,
+              inlineDynamicImports: true,
             },
           },
         },
-      });
+      })
     },
-  };
+  }
 }
 
-
-// https://vite.dev/config/
+/**
+ * ============================================================
+ * BigStock Vite Configuration
+ * ============================================================
+ */
 export default defineConfig(({ mode }) => {
+  const env = loadEnv(mode, process.cwd(), '')
 
-  // 使用 loadEnv 加載對應模式的環境變量
-  const env =
-    loadEnv(
-      mode,
-      process.cwd(),
-      '',
-    );
+  /**
+   * Backend URL 僅供 Development Proxy 使用。
+   *
+   * Production 由 Docker Nginx Proxy 負責。
+   */
+  const apiTarget = env.VITE_APP_BASE_URL
 
+  const wsTarget = env.VITE_WS_BASE_URL || env.VITE_APP_BASE_URL
 
   return {
+    /**
+     * --------------------------------------------------------
+     * Vue / Firebase Plugins
+     * --------------------------------------------------------
+     */
+    plugins: [vue(), vueDevTools(), firebaseMessagingServiceWorkerPlugin(mode, env)],
 
-    plugins: [
+    /**
+     * --------------------------------------------------------
+     * Browser Compatibility
+     * --------------------------------------------------------
+     *
+     * 避免 sockjs-client 在瀏覽器執行時：
+     *
+     * ReferenceError: global is not defined
+     *
+     * Development / Production 都生效。
+     */
+    define: {
+      global: 'globalThis',
+    },
 
-      vue(),
-
-      vueDevTools(),
-
-      firebaseMessagingServiceWorkerPlugin(
-        mode,
-        env,
-      ),
-    ],
-
-
+    /**
+     * --------------------------------------------------------
+     * Alias
+     * --------------------------------------------------------
+     */
     resolve: {
-
       alias: {
-
-        '@':
-          fileURLToPath(
-            new URL(
-              './src',
-              import.meta.url,
-            ),
-          ),
+        '@': fileURLToPath(new URL('./src', import.meta.url)),
       },
     },
 
-
+    /**
+     * --------------------------------------------------------
+     * Development Server
+     * --------------------------------------------------------
+     *
+     * 只在 npm run dev 時生效。
+     *
+     * Docker Production 不使用此設定。
+     */
     server: {
+      host: '0.0.0.0',
 
-      port: 13001, // 這裡定義開發伺服器的端口號
+      port: 13001,
 
-      strictPort: true, // 如果該端口被佔用，則直接報錯，而不是自動選擇其他端口
-
+      strictPort: true,
 
       proxy: {
+        /**
+         * ----------------------------------------------------
+         * REST API
+         * ----------------------------------------------------
+         *
+         * Frontend:
+         * /api/auth/tempToken
+         * /api/device/register
+         * /api/biz/market/USHistory
+         *
+         * Backend:
+         * /auth/tempToken
+         * /device/register
+         * /biz/market/USHistory
+         */
+        '/api': {
+          target: apiTarget,
 
-        '^/api/': {
+          changeOrigin: true,
 
-          target:
-            env.VITE_APP_BASE_URL, // 從 loadEnv 加載的環境變量
+          rewrite: (path: string) => path.replace(/^\/api(?=\/|$)/, ''),
+        },
 
-          changeOrigin: true, // 修改請求的來源，讓後端認為請求來自目標地址
+        /**
+         * ----------------------------------------------------
+         * SockJS / STOMP
+         * ----------------------------------------------------
+         *
+         * Frontend:
+         * /ws?token=...
+         * /ws/info
+         * /ws/.../websocket
+         * /ws/.../xhr_streaming
+         *
+         * Backend:
+         * 相同 /ws 路徑
+         *
+         * ws: true 支援 WebSocket Upgrade。
+         *
+         * Vite Proxy 也會處理 SockJS HTTP Transport。
+         */
+        '/ws': {
+          target: wsTarget,
 
+          changeOrigin: true,
 
-          rewrite: (path) => {
-
-            console.log(
-              'VITE_APP_BASE_URL:',
-              env.VITE_APP_BASE_URL,
-            ); // 調試環境變量
-
-            console.log(
-              'Before rewrite:',
-              path,
-            );
-
-
-            const rewrittenPath =
-              path.replace(
-                /^\/api/,
-                '',
-              );
-
-
-            console.log(
-              'After rewrite:',
-              rewrittenPath,
-            );
-
-
-            return rewrittenPath;
-          },
+          ws: true,
         },
       },
     },
-  };
-});
+
+    /**
+     * --------------------------------------------------------
+     * Production Build
+     * --------------------------------------------------------
+     */
+    build: {
+      target: 'es2020',
+
+      outDir: 'dist',
+
+      emptyOutDir: true,
+    },
+  }
+})

@@ -105,6 +105,19 @@
    * - fcmStartup.ts
    */
   import NotificationPermissionModal from '@/components/notification/NotificationPermissionModal.vue'
+
+  import { onMounted, onBeforeUnmount } from 'vue'
+  import { useMarketStore } from '@/stores/marketStore'
+
+  const marketStore = useMarketStore()
+
+  onMounted(() => {
+    marketStore.mountSocket()
+  })
+
+  onBeforeUnmount(() => {
+    void marketStore.unmountSocket()
+  })
 </script>
 
 <style>

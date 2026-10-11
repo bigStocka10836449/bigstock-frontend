@@ -1,20 +1,15 @@
-import {
-  createRouter,
-  createWebHistory,
-} from 'vue-router'
+import { createRouter, createWebHistory } from 'vue-router'
 
 // 原本已完成的 K 線圖頁面
 import Candlestick from '@/views/BstockCandlestick.vue'
 
 const router = createRouter({
-
   history: createWebHistory(import.meta.env.BASE_URL),
 
   routes: [
-
     /**
-    * BigStock 首頁
-    */
+     * BigStock 首頁
+     */
     {
       path: '/',
       name: 'home',
@@ -41,8 +36,10 @@ const router = createRouter({
     {
       path: '/stock/:stockCode',
       name: 'stock-detail',
-      component: () => import('@/views/StockBasicInfoView.vue'),
-      props: true,
+      redirect: (to) => ({
+        name: 'candlestick',
+        query: { stockCode: String(to.params.stockCode ?? '') },
+      }),
     },
 
     /**
@@ -85,6 +82,9 @@ const router = createRouter({
       path: '/market-live',
       name: 'market-live',
       component: () => import('@/views/MarketLiveView.vue'),
+      meta: {
+        title: '即時市場',
+      },
     },
 
     /**
@@ -96,7 +96,6 @@ const router = createRouter({
       component: () => import('@/views/NewsView.vue'),
     },
   ],
-
 })
 
 export default router
