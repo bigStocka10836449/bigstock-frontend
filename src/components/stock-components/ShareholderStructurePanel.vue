@@ -11,9 +11,7 @@
     </div>
 
     <p v-if="error" class="error" role="alert">{{ error }}</p>
-    <p v-if="!loaded && !loading && !error" class="muted">
-      按「載入持股分布」讀取這檔股票的歷史資料。
-    </p>
+    <p v-if="!loaded && !loading && !error" class="muted">目前沒有持股分布資料。</p>
     <p v-if="loading" class="muted">正在讀取持股分布…</p>
     <p v-if="loaded && !history.length" class="muted">目前沒有可顯示的持股分布紀錄。</p>
 
@@ -194,7 +192,9 @@
       loaded.value = false
       error.value = ''
       history.value = []
+      if (props.stockCode) void load()
     },
+    { immediate: true },
   )
   function display(value: unknown): string {
     const text = String(value ?? '').trim()
