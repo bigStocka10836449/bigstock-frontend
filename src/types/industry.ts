@@ -3,5 +3,5 @@ export type TagStocks = Record<string, string>
 export interface StockInfo {
   stockCode: string
   stockName: string
-  stockType?: string | null
+  stockType?: string | number | null
 }

@@ -20,29 +20,21 @@ export interface StockBasicInfoResponse {
   maStatus?: unknown
 }
 export interface QuarterlyFinancialVo {
-  stockId: string
-  stockName: string
-  market: string
-  year: number
-  quarter: number
-  periodStartMonth: number
-  periodEndMonth: number
+  stockId: string; stockName: string; market: string
+  year: number; quarter: number; periodStartMonth: number; periodEndMonth: number
   unit: string | null
   operatingRevenue: number | null
   operatingProfit: number | null
   nonOperatingIncomeExpense: number | null
   netProfitAfterTax: number | null
   capitalStockEndPeriod: number | null
-  earningsPerShare: number | null // 累計 EPS，非單季 EPS
+  earningsPerShare: number | null  // 累計 EPS，非單季 EPS
   netAssetValuePerShare: number | null
   quickRatio: number | null
   currentRatio: number | null
   depn: number | null
 }
 export interface MonthlyRevenueVo {
-  stockId: string
-  stockName: string
-  revenue: number | null
-  date: string
-  market: string | null
+  stockId: string; stockName: string; revenue: number | null
+  date: string; market: string | null
 }

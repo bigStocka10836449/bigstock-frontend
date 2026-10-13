@@ -13,6 +13,7 @@
     <!-- 主內容不裁切過長資料，交給整個網頁垂直捲動 -->
     <div class="content space-theme">
       <div class="content-inner">
+        <h1 class="page-title">個股查詢</h1>
         <!-- 股票輸入與查詢 -->
         <div class="query-section">
           <div class="stock-input">
@@ -32,51 +33,64 @@
           </div>
         </div>
 
-        <!-- 保留原本的 K 線圖／資券資訊兩個頁籤 -->
-        <div class="tab-section">
+        <!-- 個股查詢的六個主頁籤；每次只展示一種分析資料 -->
+        <nav class="tab-section" aria-label="個股查詢頁籤">
           <button
+            v-for="tab in mainTabs"
+            :key="tab.id"
             type="button"
-            :class="['tab', { active: isKLineChart }]"
-            @click="switchTab('kline')"
+            class="tab"
+            :class="{ active: activeTab === tab.id }"
+            :aria-current="activeTab === tab.id ? 'page' : undefined"
+            @click="selectMainTab(tab.id)"
           >
-            K線圖
+            {{ tab.label }}
           </button>
-          <button
-            type="button"
-            :class="['tab', { active: !isKLineChart }]"
-            @click="switchTab('info')"
-          >
-            資券訊息
-          </button>
-        </div>
+        </nav>
 
-        <!-- 只有資料完成載入後才建立圖表，避免 null Props 警告 -->
-        <section v-if="isKLineChart" class="chart-panel">
-          <div v-if="loadingStock" class="data-status">正在載入股票 K 線資料...</div>
-          <div v-else-if="stockError" class="data-status error">{{ stockError }}</div>
-          <Candlestick
-            v-else-if="stockData && selectedStockCode"
-            :stockData="stockData"
-            :selectedStockCode="selectedStockCode"
-            :isKLineChart="isKLineChart"
-          />
-          <div v-else class="data-status">請輸入股票代碼以查看 K 線圖</div>
-        </section>
-
-        <!-- 只在資券頁籤建立資券圖表，避免隱藏圖表的 ECharts 容器寬高為 0 -->
-        <section v-else class="margin-panel">
-          <div v-if="loadingMargin" class="data-status">正在載入資券資料...</div>
-          <div v-else-if="marginError" class="data-status error">{{ marginError }}</div>
-          <div v-else-if="stockMarginShortData && selectedStockCode" class="margin-scroll">
-            <StockInfoChart
-              :marginShortData="stockMarginShortData"
-              :selectedStockCode="selectedStockCode"
-            />
+        <!-- 技術分析保留原始 K 線、資券元件與側邊股票篩選 -->
+        <section v-if="activeTab === 'technical'" class="technical-section">
+          <div class="subtabs" aria-label="技術分析顯示類型">
+            <button type="button" :class="{ active: isKLineChart }" @click="switchTab('kline')">
+              K 線圖
+            </button>
+            <button type="button" :class="{ active: !isKLineChart }" @click="switchTab('info')">
+              資券訊息
+            </button>
           </div>
-          <div v-else class="data-status">請先選擇股票以查看資券資料</div>
+          <section v-if="isKLineChart" class="chart-panel">
+            <div v-if="loadingStock" class="data-status">正在載入股票 K 線資料...</div>
+            <div v-else-if="stockError" class="data-status error">{{ stockError }}</div>
+            <Candlestick
+              v-else-if="stockData && loadedStockCode"
+              :key="loadedStockCode"
+              :stockData="stockData"
+              :selectedStockCode="loadedStockCode"
+              :isKLineChart="true"
+            />
+            <div v-else class="data-status">請輸入股票代碼以查看 K 線圖</div>
+          </section>
+          <section v-else class="margin-panel">
+            <div v-if="loadingMargin" class="data-status">正在載入資券資料...</div>
+            <div v-else-if="marginError" class="data-status error">{{ marginError }}</div>
+            <div v-else-if="stockMarginShortData && loadedStockCode" class="margin-scroll">
+              <StockInfoChart
+                :key="loadedStockCode"
+                :marginShortData="stockMarginShortData"
+                :selectedStockCode="loadedStockCode"
+              />
+            </div>
+            <div v-else class="data-status">請先選擇股票以查看資券資料</div>
+          </section>
         </section>
-        <!-- K 線頁下方的基本面資料，不影響既有 Sidebar / K 線 / 資券元件 -->
-        <StockFundamentals v-if="loadedStockCode" :stock-code="loadedStockCode" />
+
+        <!-- 持續掛載頁籤容器：已開過的元件保留資料；未開過的元件不打 API -->
+        <StockFundamentals
+          v-if="loadedStockCode && fundamentalsVisited"
+          v-show="activeTab !== 'technical'"
+          :stock-code="loadedStockCode"
+          :active-tab="activeTab"
+        />
       </div>
     </div>
   </div>
@@ -86,7 +100,7 @@
   import Candlestick from '../components/bstock/Candlestick.vue'
   import StockInfoChart from '../components/bstock/StockInfoChart.vue'
   import FilterResults from '../components/bstock/FilterResults.vue'
-  import StockFundamentals from '../components/stock-components/StockFundamentals.vue'
+  import StockFundamentals from '@/components/stock-components/StockFundamentals.vue'
   import Sidebar from '../components/bstock/Sidebar.vue'
   import {
     getSingleStockPrice,
@@ -107,6 +121,16 @@
         stockData: null, // 股票價格數據
         stockMarginShortData: null, // 資券數據
         isKLineChart: true,
+        activeTab: 'technical',
+        fundamentalsVisited: false,
+        mainTabs: [
+          { id: 'technical', label: '技術分析' },
+          { id: 'basic', label: '個股資訊' },
+          { id: 'eps', label: 'EPS' },
+          { id: 'revenue', label: '月營收' },
+          { id: 'shareholders', label: '持股分布' },
+          { id: 'industries', label: '相關產業' },
+        ],
         loadingStock: false, // K 線載入狀態
         loadingMargin: false, // 資券載入狀態
         stockError: '', // 股票查詢錯誤
@@ -127,6 +151,11 @@
     methods: {
       switchTab(tab) {
         this.isKLineChart = tab === 'kline'
+      },
+      selectMainTab(tab) {
+        if (!this.mainTabs.some((item) => item.id === tab)) return
+        this.activeTab = tab
+        if (tab !== 'technical') this.fundamentalsVisited = true
       },
       /** 取得股票價格資料，保留既有日／週／月 K API */
       async fetchStockData(stockCode, version) {
@@ -190,6 +219,7 @@
         if (!code) return
         this.selectedStockCode = code
         this.loadedStockCode = code
+        // 切換股票後維持目前主頁籤；進入技術分析預設日 K。
         this.isKLineChart = true
         this.stockData = null
         this.stockMarginShortData = null
@@ -265,6 +295,29 @@
 </script>
 
 <style scoped>
+  .page-title {
+    margin: 0 0 16px;
+    font-size: 25px;
+    font-weight: 750;
+    color: #e8f2ef;
+  }
+  .subtabs {
+    display: flex;
+    justify-content: center;
+    gap: 12px;
+    margin: 10px 0 18px;
+  }
+  .subtabs button {
+    background: #353535;
+    color: #fff;
+    border: 0;
+    border-radius: 6px;
+    padding: 10px 20px;
+    cursor: pointer;
+  }
+  .subtabs button.active {
+    background: #4caf50;
+  }
   /* 整頁允許自然延伸，避免 Header + 100vh 使畫面超高並被裁切 */
   .stock-dashboard {
     display: flex;
@@ -366,18 +419,21 @@
   }
   .tab-section {
     display: flex;
-    gap: 10px;
-    margin-bottom: 15px;
+    gap: 8px;
+    margin-bottom: 20px;
     min-width: 0;
+    overflow-x: auto;
+    padding-bottom: 4px;
   }
   .tab {
-    flex: 1;
-    padding: 10px;
-    border: 0;
-    border-radius: 5px;
-    background: #383838;
-    color: white;
+    flex: 1 0 auto;
+    padding: 12px 14px;
+    border: 1px solid #33414c;
+    border-radius: 7px;
+    background: #20282f;
+    color: #c5d2dc;
     cursor: pointer;
+    white-space: nowrap;
   }
   .tab.active {
     background: #4caf50;

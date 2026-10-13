@@ -61,7 +61,7 @@
 
 <script setup lang="ts">
   import { computed, ref, watch } from 'vue'
-  import { readMonthly } from '@/api/stockFundamentalsApi'
+  import { readMonthlyStock } from '@/api/stockFundamentalsApi'
 
   const props = defineProps<{ stockCode: string }>()
 
@@ -106,7 +106,7 @@
     for (let start = 0; start < pending.length; start += 3) {
       if (seq !== generation) return
       const batch = pending.slice(start, start + 3)
-      const results = await Promise.allSettled(batch.map((month) => readMonthly(month)))
+      const results = await Promise.allSettled(batch.map((month) => readMonthlyStock(month, code)))
       if (seq !== generation) return
 
       results.forEach((result, index) => {
@@ -116,8 +116,8 @@
         loadingMonths.value = nextLoading
 
         if (result.status === 'fulfilled') {
-          // 每個月份 API 回傳全市場名錄；只把目前股票的營收放在畫面狀態。
-          const record = result.value.find((row) => row.stockId === code)
+          // Service 已用 Map 按 stockId 查詢，不需要再次掃描全市場資料。
+          const record = result.value
           const numberValue = record?.revenue
           const next = new Map(monthResults.value)
           next.set(

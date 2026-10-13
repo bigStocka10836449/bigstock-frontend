@@ -1,490 +1,633 @@
 <template>
-  <div class="stock-query-container">
-    <div class="view-toggle" v-if="isKLineChart">
-      <div
-        :class="['view-option', { selected: selectedView === 'day' }]"
-        @click="selectView('day')"
-      >
-        日K線
+  <section class="kline-card">
+    <header class="kline-head">
+      <div>
+        <h2>{{ selectedStockCode }} 股價走勢</h2>
+        <p>價格、均線與成交量</p>
       </div>
-      <div
-        :class="['view-option', { selected: selectedView === 'week' }]"
-        @click="selectView('week')"
-      >
-        周K線
+      <div class="period-tabs" role="group" aria-label="K線週期">
+        <button
+          v-for="period in periods"
+          :key="period.id"
+          type="button"
+          :class="{ active: selectedView === period.id }"
+          :aria-pressed="selectedView === period.id"
+          @click="selectView(period.id)"
+        >
+          {{ period.name }}
+        </button>
       </div>
-      <div
-        :class="['view-option', { selected: selectedView === 'month' }]"
-        @click="selectView('month')"
+    </header>
+    <div v-if="latest" class="quote-strip">
+      <span
+        >日期 <b>{{ latest.date }}</b></span
       >
-        月K線
-      </div>
+      <span
+        >開 <b>{{ formatPrice(latest.open) }}</b></span
+      >
+      <span
+        >高 <b>{{ formatPrice(latest.high) }}</b></span
+      >
+      <span
+        >低 <b>{{ formatPrice(latest.low) }}</b></span
+      >
+      <span
+        >收 <b>{{ formatPrice(latest.close) }}</b></span
+      >
+      <span
+        >量 <b>{{ formatVolume(latest.volume) }}</b></span
+      >
     </div>
-
-    <!-- 表格與圖表區域 -->
-    <div v-show="isKLineChart" class="content-section">
-      <!-- 表格容器 -->
-      <div v-if="tableData.length" class="data-table-container">
-        <table>
-          <thead>
-            <tr>
-              <th>日期</th>
-              <th>開盤價</th>
-              <th>收盤價</th>
-              <th>最低價</th>
-              <th>最高價</th>
-              <th>成交量</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="(row, index) in tableData.slice(0, 1)" :key="index">
-              <td>{{ row.tradingDate }}</td>
-              <td>{{ row.open }}</td>
-              <td>{{ row.close }}</td>
-              <td>{{ row.low }}</td>
-              <td>{{ row.high }}</td>
-              <td>{{ row.volume }}</td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
-
-      <!-- 蠟燭圖容器 -->
-      <div id="priceChart" ref="priceChart" class="chart-container"></div>
+    <div v-if="visibleExtremes" class="range-strip">
+      <span
+        >可見區間 <b>{{ visibleExtremes.startDate }} ～ {{ visibleExtremes.endDate }}</b></span
+      >
+      <span
+        >最高 <b class="high-price">{{ formatPrice(visibleExtremes.high) }}</b>
+        <small>{{ visibleExtremes.highDate }}</small></span
+      >
+      <span
+        >最低 <b class="low-price">{{ formatPrice(visibleExtremes.low) }}</b>
+        <small>{{ visibleExtremes.lowDate }}</small></span
+      >
+      <span v-if="latestKd"
+        >KD (9,3,3)
+        <b
+          >K {{ formatPrice(latestKd.k) }} · D {{ formatPrice(latestKd.d) }} · J
+          {{ formatPrice(latestKd.j) }}</b
+        ></span
+      >
     </div>
-  </div>
+    <div v-if="candleRows.length" class="zoom-toolbar" role="group" aria-label="K 線顯示範圍">
+      <span>顯示範圍</span>
+      <button type="button" @click="showRecent(30)">最近 30 根</button>
+      <button type="button" @click="showRecent(60)">最近 60 根</button>
+      <button type="button" @click="showRecent(90)">最近 90 根</button>
+      <button type="button" @click="showAll">全部</button>
+      <small>拖曳底部滑桿兩端可縮放；拖曳中間可移動視窗</small>
+    </div>
+    <div v-if="!candleRows.length" class="no-data">目前沒有此週期的有效 K 線資料。</div>
+    <div ref="priceChart" class="chart-container" :class="{ hidden: !candleRows.length }"></div>
+  </section>
 </template>
 
 <script>
-import * as echarts from 'echarts'
+  import * as echarts from 'echarts'
 
-export default {
-  name: 'Candlestick',
+  const numeric = (v) => {
+    if (v === null || v === undefined || String(v).trim() === '') return null
+    const n = Number(String(v).replace(/,/g, ''))
+    return Number.isFinite(n) ? n : null
+  }
+  const niceDate = (v) => String(v ?? '').trim()
 
-  data() {
-    return {
-      tableData: [],
-      stockCode: '',
-      selectedView: 'day', // 默認為日視角
-    }
-  },
-  props: {
-    isKLineChart: {
-      //是否為 K 線圖模式，默認為 true
-      type: Boolean,
-      required: true,
-    },
-    selectedStockCode: {
-      type: String,
-      default: null,
-    },
-    stockData: {
-      type: Object,
-      required: true,
-      default: () => ({}),
-    },
-  },
+  // KD (9,3,3)：依所選的日／週／月 K 獨立計算，初始 K/D = 50。
+  function calculateKD(rows, period = 9) {
+    let previousK = 50
+    let previousD = 50
+    return rows.map((row, index) => {
+      const window = rows.slice(Math.max(0, index - period + 1), index + 1)
+      const highest = Math.max(...window.map((r) => r.high))
+      const lowest = Math.min(...window.map((r) => r.low))
+      const rsv =
+        highest === lowest
+          ? 50
+          : Math.min(100, Math.max(0, ((row.close - lowest) / (highest - lowest)) * 100))
+      const k = (2 * previousK + rsv) / 3
+      const d = (2 * previousD + k) / 3
+      previousK = k
+      previousD = d
+      return { k, d, j: 3 * k - 2 * d }
+    })
+  }
 
-  watch: {
-    stockData: {
-      handler() {
-        this.updateChartData() // 執行你的邏輯
+  function visibleIndices(length, start, end) {
+    if (!length) return [0, 0]
+    const a = Math.max(0, Math.min(length - 1, Math.floor(((start ?? 0) / 100) * (length - 1))))
+    const b = Math.max(a, Math.min(length - 1, Math.ceil(((end ?? 100) / 100) * (length - 1))))
+    return [a, b]
+  }
+  export default {
+    name: 'Candlestick',
+    props: {
+      isKLineChart: { type: Boolean, default: true },
+      selectedStockCode: { type: String, default: '' },
+      stockData: { type: Object, default: () => ({}) },
+    },
+    data() {
+      return {
+        selectedView: 'day',
+        periods: [
+          { id: 'day', name: '日 K' },
+          { id: 'week', name: '週 K' },
+          { id: 'month', name: '月 K' },
+        ],
+        priceChart: null,
+        resizeObserver: null,
+        zoomStart: 0,
+        zoomEnd: 100,
+        zoomContext: '',
+        onZoom: null,
+      }
+    },
+    computed: {
+      candleRows() {
+        const prop = {
+          day: 'singleStockDayPriceVos',
+          week: 'singleStockWeekPriceVos',
+          month: 'singleStockMonthPriceVos',
+        }[this.selectedView]
+        const source = this.stockData?.[prop]
+        if (!Array.isArray(source)) return []
+        return source
+          .flatMap((item) => {
+            if (!item || typeof item !== 'object') return []
+            const open = numeric(item.openingPrice)
+            const close = numeric(item.closingPrice)
+            const low = numeric(item.lowPrice)
+            const high = numeric(item.highPrice)
+            const date = niceDate(item.firstTradingDate || item.tradingDate)
+            if (!date || [open, close, low, high].some((n) => n === null)) return []
+            return [
+              {
+                date,
+                open,
+                close,
+                low,
+                high,
+                volume: numeric(item.tradingVolume),
+                ma5: numeric(item.fiveMa),
+                ma10: numeric(item.tenMa),
+                ma20: numeric(item.twentyMa),
+                ma60: numeric(item.sixtyMa),
+              },
+            ]
+          })
+          .sort((a, b) => a.date.localeCompare(b.date))
+      },
+      latest() {
+        return this.candleRows[this.candleRows.length - 1] ?? null
+      },
+      kdRows() {
+        return calculateKD(this.candleRows)
+      },
+      latestKd() {
+        return this.kdRows[this.kdRows.length - 1] ?? null
+      },
+      visibleExtremes() {
+        const rows = this.candleRows
+        if (!rows.length) return null
+        const [a, b] = visibleIndices(rows.length, this.zoomStart, this.zoomEnd)
+        const visible = rows.slice(a, b + 1)
+        const max = visible.reduce((best, row) => (row.high > best.high ? row : best), visible[0])
+        const min = visible.reduce((best, row) => (row.low < best.low ? row : best), visible[0])
+        return {
+          startDate: visible[0].date,
+          endDate: visible[visible.length - 1].date,
+          high: max.high,
+          highDate: max.date,
+          low: min.low,
+          lowDate: min.date,
+        }
       },
     },
-    selectedStockCode: {
-      handler(value){
-        this.stockCode = value;
+    watch: {
+      candleRows: {
+        handler() {
+          this.$nextTick(() => this.renderChart())
+        },
+        immediate: false,
+      },
+      isKLineChart() {
+        this.$nextTick(() => this.priceChart?.resize())
+      },
+    },
+    mounted() {
+      this.priceChart = echarts.init(this.$refs.priceChart, 'dark', { renderer: 'canvas' })
+      // 只同步可見範圍，不在 datazoom 回呼中重繪整張圖。
+      this.onZoom = (event) => {
+        if (!this.priceChart || this.priceChart.isDisposed()) return
+        const payload = event?.batch?.[0] ?? event
+        let start = Number(payload?.start)
+        let end = Number(payload?.end)
+        // 不同 ECharts 版本、滑鼠/滑桿操作可能不帶百分比，從當前 option 補取。
+        if (!Number.isFinite(start) || !Number.isFinite(end)) {
+          const zoom = this.priceChart.getOption()?.dataZoom?.find((z) => z.id === 'zoom-slider')
+          start = Number(zoom?.start)
+          end = Number(zoom?.end)
+        }
+        if (!Number.isFinite(start) || !Number.isFinite(end)) return
+        this.zoomStart = Math.max(0, Math.min(100, start))
+        this.zoomEnd = Math.max(this.zoomStart, Math.min(100, end))
       }
-    }
-  },
-  mounted() {
-    this.priceChart = echarts.init(this.$refs.priceChart)
-    this.renderChart()
-  },
-  computed: {
-    computedIsKLineChart() {
-      return this.isKLineChart
-    },
-  },
-  methods: {
-    switchTab(tab) {
-      this.isKLineChart = tab === 'kline'
-    },
-    selectView(view) {
-      this.selectedView = view
-      this.updateChartData()
-      console.log('切換到:', view)
-    },
-
-    updateChartData() {
-      const { singleStockDayPriceVos, singleStockWeekPriceVos, singleStockMonthPriceVos } =
-        this.stockData
-
-      // 組織資料結構
-      const localStockData = {
-        day: singleStockDayPriceVos.sort(
-          (a, b) => new Date(a.tradingDate) - new Date(b.tradingDate),
-        ),
-        week: singleStockWeekPriceVos.sort(
-          (a, b) => new Date(a.tradingDate) - new Date(b.tradingDate),
-        ),
-        month: singleStockMonthPriceVos.sort(
-          (a, b) => new Date(a.tradingDate) - new Date(b.tradingDate),
-        ),
+      this.priceChart.on('datazoom', this.onZoom)
+      this.renderChart()
+      if (typeof ResizeObserver !== 'undefined') {
+        this.resizeObserver = new ResizeObserver(() => this.priceChart?.resize())
+        this.resizeObserver.observe(this.$refs.priceChart)
       }
-
-      // 根據當前選擇的視角（day、week、month）選擇資料
-      if (!localStockData || !localStockData.day) return
-      let selectedData
-      switch (this.selectedView) {
-        case 'day':
-          selectedData = localStockData.day
-          break
-        case 'week':
-          selectedData = localStockData.week
-          break
-        case 'month':
-          selectedData = localStockData.month
-          break
-        default:
-          console.error('未知的視角選擇：', this.selectedView)
+    },
+    beforeUnmount() {
+      this.resizeObserver?.disconnect()
+      if (this.onZoom && this.priceChart) this.priceChart.off('datazoom', this.onZoom)
+      this.priceChart?.dispose()
+      this.priceChart = null
+    },
+    methods: {
+      selectView(view) {
+        this.selectedView = view
+      },
+      setZoom(start, end) {
+        this.zoomStart = Math.max(0, Math.min(100, start))
+        this.zoomEnd = Math.max(this.zoomStart, Math.min(100, end))
+        if (this.priceChart && !this.priceChart.isDisposed()) {
+          // 同時更新 inside / slider；不重建 ECharts instance。
+          this.priceChart.dispatchAction({
+            type: 'dataZoom',
+            start: this.zoomStart,
+            end: this.zoomEnd,
+          })
+        }
+      },
+      showRecent(count) {
+        const length = this.candleRows.length
+        if (!length) return
+        this.setZoom(Math.max(0, 100 * (1 - Math.min(length, count) / length)), 100)
+      },
+      showAll() {
+        this.setZoom(0, 100)
+      },
+      formatPrice(value) {
+        return value == null
+          ? '—'
+          : Number(value).toLocaleString('zh-TW', { maximumFractionDigits: 2 })
+      },
+      formatVolume(value) {
+        return value == null ? '—' : Number(value).toLocaleString('zh-TW')
+      },
+      renderChart() {
+        const chart = this.priceChart
+        if (!chart) return
+        const rows = this.candleRows
+        if (!rows.length) {
+          chart.clear()
           return
-      }
-
-      // 確保選擇的資料存在
-      if (!selectedData || selectedData.length === 0) {
-        console.warn(`無法獲取 ${this.selectedView} 資料`)
-        this.tableData = []
-        return
-      }
-
-      // 提取日期、價格和成交量
-      const dates = selectedData.map((item) =>
-        this.selectedView === 'day' ? item.tradingDate : item.firstTradingDate,
-      )
-      const prices = selectedData.map((item) => [
-        parseFloat(item.openingPrice),
-        parseFloat(item.closingPrice),
-        parseFloat(item.lowPrice),
-        parseFloat(item.highPrice),
-      ])
-      const volumes = selectedData.map((item) =>
-        item.tradingVolume !== null ? parseFloat(item.tradingVolume) : 0,
-      )
-
-      const ma5 = selectedData.map((item) => (item.fiveMa == 0 ? null : item.fiveMa))
-      const ma10 = selectedData.map((item) => (item.tenMa == 0 ? null : item.tenMa))
-      const ma20 = selectedData.map((item) => (item.twentyMa == 0 ? null : item.twentyMa))
-      const ma60 = selectedData.map((item) => (item.sixtyMa == 0 ? null : item.sixtyMa))
-
-      // 更新圖表
-      this.renderChart(dates, prices, volumes, ma5, ma10, ma20, ma60)
-
-    },
-
-    renderChart(dates, prices, volumes, ma5, ma10, ma20, ma60) {
-      if (!prices || !Array.isArray(prices)) {
-        return
-      }
-      const maxPrice = Math.max(...prices.flatMap((price) => (Array.isArray(price) ? price : [])))
-      if (!isFinite(maxPrice)) {
-        console.warn('无法计算 maxPrice，prices 数据可能有误:', prices)
-      }
-
-      const yAxisMax = maxPrice * 1.2 // 最大值的 1.2 倍
-      const option = {
-        title: {
-          text: `股票價格 - ${this.stockCode}`,
-          left: 'left',
-        },
-        tooltip: {
-          trigger: 'axis',
-          axisPointer: {
-            type: 'cross',
-          },
-          formatter: (params) => {
-            // 異步更新表格數據，避免阻塞 tooltip 的正常顯示
-            setTimeout(() => {
-              this.updateTableData(params, volumes)
-            }, 0)
-
-            // 繼續正常生成 tooltipText
-            let tooltipText = `${params[0].axisValue}<br/>`
-            return tooltipText
-          },
-        },
-        legend: {
-          data: ['日K', 'MA5', 'MA10', 'MA20', 'MA60'],
-        },
-        grid: {
-          left: '10%',
-          right: '10%',
-          bottom: '15%',
-        },
-        xAxis: {
-          type: 'category',
-          data: dates,
-          scale: true,
-          boundaryGap: false,
-          axisLine: { onZero: false },
-          splitLine: {
-            show: false,
-          },
-          min: 'dataMin',
-          max: 'dataMax',
-        },
-        yAxis: {
-          scale: true,
-          splitNumber: 10,
-          max: yAxisMax, // 將 Y 軸的最大值設置為最大值的 1.2 倍
-          splitArea: {
-            show: true,
-          },
-        },
-        dataZoom: [
-          {
-            // 滑块缩放
-            type: 'slider',
-            start: 60, // 显示数据的起始百分比
-            end: 100, // 显示数据的结束百分比
-            textStyle: {
-              color: '#8392A5',
-            },
-            handleIcon:
-              'path://M10.7,11.9v-1.3H9.3v1.3c-4.9,0.3-8.8,4.4-8.8,9.4c0,5,3.9,9.1,8.8,9.4v1.3h1.3v-1.3c4.9-0.3,8.8-4.4,8.8-9.4C19.5,16.3,15.6,12.2,10.7,11.9z M13.3,24.4H6.7V23h6.6V24.4z M13.3,19.6H6.7v-1.4h6.6V19.6z',
-            dataBackground: {
-              areaStyle: {
-                color: '#8392A5',
-              },
-              lineStyle: {
-                opacity: 0.8,
-                color: '#8392A5',
-              },
-            },
-            brushSelect: true,
-          },
-          {
-            // 内部滚动缩放
-            id: 'dataZoomX',
-            type: 'inside',
-            start: 60, // 数据范围起始百分比
-            end: 100, // 数据范围结束百分比
-            realtime: true, // 开启实时更新
-            filterMode: 'weakFilter', // 允许部分数据在缩放范围内显示
-            xAxisIndex: [0], // 应用到第一个 xAxis
-          },
-        ],
-        series: [
-          {
-            name: '日K',
-            type: 'candlestick',
-            data: prices,
-            itemStyle: {
-              color: '#ec0000',
-              color0: '#00da3c',
-              borderColor: '#8A0000',
-              borderColor0: '#008F28',
-            },
-            markPoint: {
-              label: {
-                formatter: function (param) {
-                  return param != null ? Math.round(param.value) : ''
-                },
-              },
-              data: [
-                {
-                  name: '最高值',
-                  type: 'none',
-                  valueDim: 'highest',
-                },
-                {
-                  name: '最低值',
-                  type: 'none',
-                  valueDim: 'lowest',
-                },
-              ],
-            },
-            /*    markLine: {
-              symbol: ['none', 'none'],
-              data: [
-                {
-                  name: '平均值',
-                  type: 'average',
-                  valueDim: 'close',
-                },
-              ],
-            },*/
-          },
-          {
-            name: 'MA5',
-            type: 'line',
-            data: ma5,
-            smooth: true,
-            lineStyle: {
-              width: 1.5,
-              opacity: 0.5,
-            },
-            symbol: 'none',
-            emphasis: {
-              focus: 'series',
-              itemStyle: {
-                opacity: 1,
-              },
-              symbol: 'circle',
-              symbolSize: 6,
-            },
-          },
-          {
-            name: 'MA10',
-            type: 'line',
-            data: ma10,
-            smooth: true,
-            lineStyle: {
-              width: 1.5,
-              opacity: 0.5,
-            },
-            symbol: 'none',
-            emphasis: {
-              focus: 'series',
-              itemStyle: {
-                opacity: 1,
-              },
-              symbol: 'circle',
-              symbolSize: 6,
-            },
-          },
-          {
-            name: 'MA20',
-            type: 'line',
-            data: ma20,
-            smooth: true,
-            lineStyle: {
-              width: 1.5,
-              opacity: 0.5,
-            },
-            symbol: 'none',
-            emphasis: {
-              focus: 'series',
-              itemStyle: {
-                opacity: 1,
-              },
-              symbol: 'circle',
-              symbolSize: 6,
-            },
-          },
-          {
-            name: 'MA60',
-            type: 'line',
-            data: ma60,
-            smooth: true,
-            lineStyle: {
-              width: 1.5,
-              opacity: 0.5,
-            },
-            symbol: 'none',
-            emphasis: {
-              focus: 'series',
-              itemStyle: {
-                opacity: 1,
-              },
-              symbol: 'circle',
-              symbolSize: 6,
-            },
-          },
-        ],
-      }
-
-      this.priceChart.setOption(option)
-      this.priceChart.resize()
-    },
-
-    updateTableData(params, volumes) {
-      this.tableData = params
-        .filter((param) => param?.data && param.data.length > 0)
-        .map((param) => ({
-          tradingDate: param.axisValue,
-          open: param.data[1],
-          close: param.data[2],
-          low: param.data[4],
-          high: param.data[3],
-          volume: volumes[params[0].dataIndex] || 0,
+        }
+        const dates = rows.map((r) => r.date)
+        const candles = rows.map((r) => [r.open, r.close, r.low, r.high])
+        const volumes = rows.map((r) => ({
+          value: r.volume,
+          itemStyle: { color: r.close >= r.open ? '#ef5350' : '#26a69a' },
         }))
+        const ma = (field) =>
+          rows.map((r) => (r[field] == null || r[field] === 0 ? null : r[field]))
+        const kd = this.kdRows
+        // 同一股票、同一週期重新整理時保留滑桿位置；切換股票或週期才重設。
+        const context = `${this.selectedStockCode}:${this.selectedView}`
+        if (this.zoomContext !== context) {
+          this.zoomStart = Math.max(0, 100 * (1 - Math.min(rows.length, 90) / rows.length))
+          this.zoomEnd = 100
+          this.zoomContext = context
+        }
+        const zoomStart = this.zoomStart
+        const zoomEnd = this.zoomEnd
+        const text = '#9daeba'
+        const gridLine = 'rgba(161,181,196,.11)'
+        chart.setOption(
+          {
+            backgroundColor: 'transparent',
+            animation: false,
+            color: ['#ef5350', '#6ba4ff', '#92cb73', '#ffc460', '#c19af4'],
+            tooltip: {
+              trigger: 'axis',
+              axisPointer: { type: 'cross', crossStyle: { color: '#7b8e9d' } },
+              backgroundColor: '#111b24',
+              borderColor: '#3e5363',
+              textStyle: { color: '#e8eef4' },
+              formatter(params) {
+                const p = params?.find((item) => item.seriesType === 'candlestick')
+                const i = p?.dataIndex ?? params?.[0]?.dataIndex
+                const r = rows[i]
+                if (!r) return ''
+                const fmt = (v) =>
+                  v == null ? '—' : Number(v).toLocaleString('zh-TW', { maximumFractionDigits: 2 })
+                return `<b>${r.date}</b><br/>開 ${fmt(r.open)}　高 ${fmt(r.high)}<br/>低 ${fmt(r.low)}　收 ${fmt(r.close)}<br/>量 ${fmt(r.volume)}`
+              },
+            },
+            legend: {
+              top: 9,
+              left: 'center',
+              textStyle: { color: text },
+              data: ['K 線', 'MA5', 'MA10', 'MA20', 'MA60', 'K(9)', 'D(3)'],
+            },
+            axisPointer: { link: [{ xAxisIndex: 'all' }], label: { backgroundColor: '#34485b' } },
+            grid: [
+              { left: 68, right: 45, top: 56, height: '47%' },
+              { left: 68, right: 45, top: '62%', height: '10%' },
+              { left: 68, right: 45, top: '77%', height: '11%' },
+            ],
+            xAxis: [
+              {
+                type: 'category',
+                data: dates,
+                boundaryGap: true,
+                axisLine: { lineStyle: { color: '#526372' } },
+                axisLabel: { show: false },
+                axisTick: { show: false },
+                splitLine: { show: false },
+              },
+              {
+                type: 'category',
+                gridIndex: 1,
+                data: dates,
+                boundaryGap: true,
+                axisLine: { lineStyle: { color: '#526372' } },
+                axisLabel: { show: false },
+                axisTick: { show: false },
+                splitLine: { show: false },
+              },
+              {
+                type: 'category',
+                gridIndex: 2,
+                data: dates,
+                boundaryGap: true,
+                axisLine: { lineStyle: { color: '#526372' } },
+                axisLabel: { color: text, hideOverlap: true },
+                axisTick: { show: false },
+                splitLine: { show: false },
+              },
+            ],
+            yAxis: [
+              {
+                type: 'value',
+                scale: true,
+                position: 'right',
+                splitNumber: 5,
+                axisLabel: { color: text, formatter: (v) => Number(v).toFixed(1) },
+                axisLine: { show: false },
+                splitLine: { lineStyle: { color: gridLine } },
+                splitArea: { show: false },
+              },
+              {
+                type: 'value',
+                gridIndex: 1,
+                scale: true,
+                position: 'right',
+                splitNumber: 2,
+                axisLabel: {
+                  color: text,
+                  formatter: (v) =>
+                    v >= 1000000
+                      ? `${(v / 1000000).toFixed(1)}M`
+                      : v >= 1000
+                        ? `${(v / 1000).toFixed(0)}K`
+                        : v,
+                },
+                splitLine: { show: false },
+                axisLine: { show: false },
+              },
+              {
+                type: 'value',
+                gridIndex: 2,
+                min: 0,
+                max: 100,
+                interval: 50,
+                position: 'right',
+                axisLabel: { color: text },
+                axisLine: { show: false },
+                splitLine: { lineStyle: { color: gridLine } },
+              },
+            ],
+            dataZoom: [
+              {
+                id: 'zoom-inside',
+                type: 'inside',
+                xAxisIndex: [0, 1, 2],
+                start: zoomStart,
+                end: zoomEnd,
+                filterMode: 'none',
+                zoomOnMouseWheel: 'ctrl',
+                moveOnMouseWheel: false,
+                moveOnMouseMove: true,
+                throttle: 50,
+              },
+              {
+                id: 'zoom-slider',
+                type: 'slider',
+                xAxisIndex: [0, 1, 2],
+                bottom: 7,
+                height: 28,
+                start: zoomStart,
+                end: zoomEnd,
+                filterMode: 'none',
+                realtime: true,
+                brushSelect: false,
+                showDataShadow: false,
+                showDetail: false,
+                borderColor: '#42535f',
+                backgroundColor: '#111922',
+                fillerColor: 'rgba(83,155,184,.22)',
+                handleSize: '90%',
+                handleStyle: { color: '#83becb', borderColor: '#a5d8df' },
+                moveHandleStyle: { color: '#6d99a8' },
+                textStyle: { color: text },
+              },
+            ],
+            series: [
+              {
+                name: 'K 線',
+                type: 'candlestick',
+                xAxisIndex: 0,
+                yAxisIndex: 0,
+                data: candles,
+                itemStyle: {
+                  color: '#ef5350',
+                  color0: '#26a69a',
+                  borderColor: '#ef5350',
+                  borderColor0: '#26a69a',
+                },
+              },
+              ...[
+                ['MA5', 'ma5'],
+                ['MA10', 'ma10'],
+                ['MA20', 'ma20'],
+                ['MA60', 'ma60'],
+              ].map(([name, key]) => ({
+                name,
+                type: 'line',
+                xAxisIndex: 0,
+                yAxisIndex: 0,
+                data: ma(key),
+                smooth: false,
+                showSymbol: false,
+                connectNulls: false,
+                lineStyle: { width: 1.4 },
+              })),
+              {
+                name: '成交量',
+                type: 'bar',
+                xAxisIndex: 1,
+                yAxisIndex: 1,
+                data: volumes,
+                barMaxWidth: 12,
+                silent: false,
+              },
+              {
+                name: 'K(9)',
+                type: 'line',
+                xAxisIndex: 2,
+                yAxisIndex: 2,
+                data: kd.map((x) => x.k),
+                showSymbol: false,
+                lineStyle: { width: 1.5, color: '#5aa9ff' },
+                itemStyle: { color: '#5aa9ff' },
+              },
+              {
+                name: 'D(3)',
+                type: 'line',
+                xAxisIndex: 2,
+                yAxisIndex: 2,
+                data: kd.map((x) => x.d),
+                showSymbol: false,
+                lineStyle: { width: 1.5, color: '#ffc460' },
+                itemStyle: { color: '#ffc460' },
+              },
+            ],
+          },
+          { notMerge: true, lazyUpdate: false },
+        )
+        this.$nextTick(() => chart.resize())
+      },
     },
-  },
-}
+  }
 </script>
 
 <style scoped>
-
-/* 頁籤區域樣式 */
-.tab-section {
-  display: flex;
-  margin-bottom: 15px;
-  gap: 10px;
-}
-
-.tab {
-  flex: 1;
-  text-align: center;
-  padding: 10px;
-  cursor: pointer;
-  background-color: #383838;
-  color: white;
-  border-radius: 5px;
-  transition: background-color 0.3s;
-}
-
-.tab.active {
-  background-color: #4caf50;
-  color: white;
-}
-
-/* 日K線、周K線、月K線選項樣式 */
-.view-toggle {
-  display: flex;
-  justify-content: center;
-  gap: 15px;
-  margin-bottom: 15px;
-}
-
-.view-option {
-  padding: 8px 12px;
-  cursor: pointer;
-  background-color: #383838;
-  color: white;
-  border-radius: 5px;
-  transition: background-color 0.3s;
-}
-
-.view-option.selected {
-  background-color: #4caf50;
-}
-
-/* 表格容器樣式 */
-.data-table-container {
-  margin-bottom: 15px;
-}
-
-table {
-  width: 100%;
-  border-collapse: collapse;
-  margin-top: 10px;
-}
-
-th,
-td {
-  border: 1px solid #ddd;
-  padding: 8px;
-  text-align: center;
-}
-
-th {
-  background-color: #4caf50;
-  color: white;
-}
-
-.chart-container {
-  height: 400px;
-  background-color: #2c2c2c;
-}
+  .kline-card {
+    width: 100%;
+    min-width: 0;
+    padding: 16px;
+    box-sizing: border-box;
+    background: #1c252e;
+    border: 1px solid #34424e;
+    border-radius: 14px;
+    color: #e6eef5;
+  }
+  .kline-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 16px;
+    flex-wrap: wrap;
+  }
+  .kline-head h2 {
+    font-size: 18px;
+    margin: 0;
+  }
+  .kline-head p {
+    font-size: 12px;
+    color: #8fa3b4;
+    margin: 5px 0 0;
+  }
+  .period-tabs {
+    display: flex;
+    gap: 6px;
+  }
+  .period-tabs button {
+    background: #293844;
+    color: #bed0de;
+    border: 1px solid #405261;
+    border-radius: 7px;
+    cursor: pointer;
+    padding: 8px 14px;
+  }
+  .period-tabs button.active {
+    background: #205a46;
+    color: #9bf0c9;
+    border-color: #347e60;
+  }
+  .quote-strip {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px 22px;
+    margin: 15px 0 5px;
+    font-size: 12px;
+    color: #8ea5b5;
+  }
+  .quote-strip b {
+    color: #e7eff6;
+    margin-left: 6px;
+  }
+  .range-strip {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 9px 24px;
+    padding: 10px 12px;
+    margin: 10px 0;
+    border: 1px solid #354652;
+    background: #15212b;
+    border-radius: 8px;
+    font-size: 12px;
+    color: #94a9bc;
+  }
+  .range-strip b {
+    margin-left: 5px;
+    color: #e9f2f8;
+  }
+  .range-strip small {
+    color: #8298aa;
+    margin-left: 4px;
+  }
+  .range-strip .high-price {
+    color: #f16b70;
+  }
+  .range-strip .low-price {
+    color: #4ad0a8;
+  }
+  .zoom-toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    margin: 8px 0 4px;
+    color: #9ab0c0;
+    font-size: 12px;
+  }
+  .zoom-toolbar button {
+    padding: 6px 10px;
+    border: 1px solid #426071;
+    border-radius: 6px;
+    background: #253745;
+    color: #d9eaf5;
+    cursor: pointer;
+  }
+  .zoom-toolbar button:hover {
+    background: #335369;
+  }
+  .zoom-toolbar small {
+    color: #849cac;
+  }
+  .chart-container {
+    height: 660px;
+    width: 100%;
+    min-width: 0;
+  }
+  .chart-container.hidden {
+    height: 0;
+    overflow: hidden;
+  }
+  .no-data {
+    padding: 32px 12px;
+    color: #a1b2c0;
+    text-align: center;
+  }
+  @media (max-width: 700px) {
+    .kline-card {
+      padding: 10px;
+    }
+    .chart-container {
+      height: 540px;
+    }
+  }
 </style>

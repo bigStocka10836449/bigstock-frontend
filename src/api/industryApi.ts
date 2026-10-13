@@ -21,6 +21,7 @@ export async function getStockTags(stockCode: string): Promise<unknown> {
  * 股票名錄是全量資料，使用同源 localStorage 持久快取。
  * - 同一瀏覽器的多分頁共享（不需要 SharedWorker）。
  * - 24 小時內直接讀本地，不呼叫 stockInfo API。
+ * - v2 快取必須包含 stockType，避免沿用缺少市場資訊的舊版名錄。
  * - 超過 24 小時重新取得，成功後才覆蓋舊快取。
  * - API 失敗時允許沿用舊名錄，避免搜尋整個失效。
  * - 同一分頁並行呼叫共用同一 Promise。
@@ -28,7 +29,7 @@ export async function getStockTags(stockCode: string): Promise<unknown> {
  * 這裡快取的是公開股票名錄，不是 JWT 或使用者個資。
  */
 const STOCK_INFO_URL = '/biz/stockInfo'
-const STOCK_INFO_CACHE_KEY = 'bigstock:stock-info:v1'
+const STOCK_INFO_CACHE_KEY = 'bigstock:stock-info:v2'
 const STOCK_INFO_TTL_MS = 24 * 60 * 60 * 1000
 
 interface StockInfoCache {
@@ -39,15 +40,12 @@ interface StockInfoCache {
 let pendingStockInfo: Promise<StockInfo[]> | null = null
 
 function isStockInfoArray(value: unknown): value is StockInfo[] {
-  return (
-    Array.isArray(value) &&
-    value.every(
-      (item) =>
-        item !== null &&
-        typeof item === 'object' &&
-        typeof item.stockCode === 'string' &&
-        typeof item.stockName === 'string',
-    )
+  return Array.isArray(value) && value.every(item =>
+    item !== null &&
+    typeof item === 'object' &&
+    typeof item.stockCode === 'string' &&
+    typeof item.stockName === 'string' &&
+    (typeof item.stockType === 'string' || typeof item.stockType === 'number'),
   )
 }
 
@@ -65,8 +63,7 @@ function readStockInfoCache(): StockInfoCache | null {
       !Number.isFinite(candidate.savedAt) ||
       candidate.savedAt > Date.now() ||
       !isStockInfoArray(candidate.stocks)
-    )
-      return null
+    ) return null
 
     return { savedAt: candidate.savedAt, stocks: candidate.stocks }
   } catch (error) {
@@ -114,11 +111,9 @@ export function getAllStockInfo(forceRefresh = false): Promise<StockInfo[]> {
   })()
 
   pendingStockInfo = request
-  void request
-    .finally(() => {
-      if (pendingStockInfo === request) pendingStockInfo = null
-    })
-    .catch(() => undefined)
+  void request.finally(() => {
+    if (pendingStockInfo === request) pendingStockInfo = null
+  }).catch(() => undefined)
   return request
 }
 

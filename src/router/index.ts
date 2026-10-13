@@ -1,6 +1,6 @@
 import { createRouter, createWebHistory } from 'vue-router'
 
-// 原本已完成的 K 線圖頁面
+// 個股查詢頁，沿用原本的 K 線頁面與 URL
 import Candlestick from '@/views/BstockCandlestick.vue'
 
 const router = createRouter({
@@ -17,7 +17,7 @@ const router = createRouter({
     },
 
     /**
-     * K 線圖與股票篩選
+     * 個股查詢：技術分析、基本資訊、EPS、月營收、持股分布、相關產業
      *
      * 保留原本已完成的功能。
      */
@@ -36,10 +36,7 @@ const router = createRouter({
     {
       path: '/stock/:stockCode',
       name: 'stock-detail',
-      redirect: (to) => ({
-        name: 'candlestick',
-        query: { stockCode: String(to.params.stockCode ?? '') },
-      }),
+      redirect: to => ({ name: 'candlestick', query: { stockCode: String(to.params.stockCode ?? '') } }),
     },
 
     /**

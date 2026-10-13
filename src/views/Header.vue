@@ -7,7 +7,7 @@
       <!-- 全站路由選單，手機可左右捲動。 -->
       <nav class="nav-menu" aria-label="網站主要導覽">
         <RouterLink to="/">首頁</RouterLink>
-        <RouterLink to="/candlestick">K 線圖</RouterLink>
+        <RouterLink to="/candlestick">個股查詢</RouterLink>
         <RouterLink to="/industries">產業分類</RouterLink>
         <RouterLink to="/calendar">財經行事曆</RouterLink>
         <RouterLink to="/market-live">即時市場</RouterLink>

@@ -44,17 +44,23 @@
       { label: '市值', value: display(v.marketCap) },
     ]
   })
-  // 只按股票代號載入一次，市場資訊稍後更新不會導致重複呼叫。
+  // 只有 stockCode 和 market 都確定後才呼叫 API，避免缺少 market 造成錯誤。
+  // 股票或市場變化後會重新載入，revision 保證舊回應不會覆蓋新股票。
   watch(
-    () => props.stockCode,
-    async (code) => {
+    () => [props.stockCode, props.market] as const,
+    async ([code, market]) => {
       const seq = ++revision
       info.value = null
       error.value = ''
-      loading.value = Boolean(code)
+      loading.value = Boolean(code && market)
       if (!code) return
+      if (!market) {
+        error.value = '尚未辨識股票市場別，請確認 stockInfo 的 stockType。'
+        loading.value = false
+        return
+      }
       try {
-        const data = await getStockBasicInfo(code, props.market)
+        const data = await getStockBasicInfo(code, market)
         if (seq === revision) info.value = data
       } catch (e) {
         if (seq === revision) {

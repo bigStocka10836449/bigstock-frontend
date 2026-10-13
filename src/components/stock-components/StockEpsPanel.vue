@@ -4,7 +4,13 @@
     <p class="note">
       資料為當年度累計 EPS；單季 EPS = 本季累計 EPS − 前季累計 EPS（Q1 直接使用累計值）。
     </p>
-    <p v-if="!market" class="muted">正在確認上市／上櫃市場…</p>
+    <p v-if="!market && marketStatus === 'loading'" class="muted">正在確認上市／上櫃市場…</p>
+    <p v-else-if="!market && marketStatus === 'unsupported'" class="muted">
+      興櫃股票暫無此季度財報資料。
+    </p>
+    <p v-else-if="!market" class="error">
+      無法辨識股票市場別。請在上方選擇上市（TWSE）或上櫃（TPEX），選擇後會自動讀取 EPS。
+    </p>
     <p v-else-if="loading" class="muted">正在讀取最近五期季度財報…</p>
     <p v-else-if="error" class="error">{{ error }}</p>
     <template v-else>
@@ -35,8 +41,12 @@
 <script setup lang="ts">
   import { ref, watch } from 'vue'
   import type { ExchangeMarket } from '@/api/stockFundamentalsApi'
-  import { readQuarterly } from '@/api/stockFundamentalsApi'
-  const props = defineProps<{ stockCode: string; market: ExchangeMarket | null }>()
+  import { readQuarterlyStock } from '@/api/stockFundamentalsApi'
+  const props = defineProps<{
+    stockCode: string
+    market: ExchangeMarket | null
+    marketStatus?: 'loading' | 'resolved' | 'unresolved' | 'unsupported'
+  }>()
   type Row = { key: string; cumulative: number | null; single: number | null }
   const rows = ref<Row[]>([]),
     loading = ref(false),
@@ -72,15 +82,14 @@
       if (!code || !market) return
       const timeline = periods(5)
       const results = await Promise.allSettled(
-        timeline.map((p) => readQuarterly(p.year, p.quarter, market)),
+        timeline.map((p) => readQuarterlyStock(p.year, p.quarter, market, code)),
       )
       if (seq !== revision) return
       try {
         const eps = new Map<string, number | null>()
         timeline.forEach((p, i) => {
           const batch = results[i]
-          const record =
-            batch?.status === 'fulfilled' ? batch.value.find((x) => x.stockId === code) : undefined
+          const record = batch?.status === 'fulfilled' ? batch.value : undefined
           eps.set(
             `${p.year}Q${p.quarter}`,
             typeof record?.earningsPerShare === 'number' ? record.earningsPerShare : null,
