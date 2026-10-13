@@ -18,24 +18,26 @@
         </button>
       </div>
     </header>
-    <div v-if="latest" class="quote-strip">
+    <!-- OHLC 與成交量依十字線所在 K 棒更新，離開圖表則顯示最新交易日。 -->
+    <div v-if="displayRow" class="quote-strip">
+      <span class="quote-focus">{{ hoverIndex === null ? '最新一根' : '游標位置' }}</span>
       <span
-        >日期 <b>{{ latest.date }}</b></span
+        >日期 <b>{{ displayRow.date }}</b></span
       >
       <span
-        >開 <b>{{ formatPrice(latest.open) }}</b></span
+        >開盤 <b>{{ formatPrice(displayRow.open) }}</b></span
       >
       <span
-        >高 <b>{{ formatPrice(latest.high) }}</b></span
+        >最高 <b class="high-price">{{ formatPrice(displayRow.high) }}</b></span
       >
       <span
-        >低 <b>{{ formatPrice(latest.low) }}</b></span
+        >最低 <b class="low-price">{{ formatPrice(displayRow.low) }}</b></span
       >
       <span
-        >收 <b>{{ formatPrice(latest.close) }}</b></span
+        >收盤 <b>{{ formatPrice(displayRow.close) }}</b></span
       >
       <span
-        >量 <b>{{ formatVolume(latest.volume) }}</b></span
+        >成交量 <b>{{ formatVolume(displayRow.volume) }}</b></span
       >
     </div>
     <div v-if="visibleExtremes" class="range-strip">
@@ -50,12 +52,13 @@
         >最低 <b class="low-price">{{ formatPrice(visibleExtremes.low) }}</b>
         <small>{{ visibleExtremes.lowDate }}</small></span
       >
-      <span v-if="latestKd"
+      <span v-if="displayKd"
         >KD (9,3,3)
         <b
-          >K {{ formatPrice(latestKd.k) }} · D {{ formatPrice(latestKd.d) }} · J
-          {{ formatPrice(latestKd.j) }}</b
-        ></span
+          >K {{ formatPrice(displayKd.k) }} · D {{ formatPrice(displayKd.d) }} · J
+          {{ formatPrice(displayKd.j) }}</b
+        >
+        <small>{{ hoverIndex === null ? '最新一根' : candleRows[hoverIndex]?.date }}</small></span
       >
     </div>
     <div v-if="candleRows.length" class="zoom-toolbar" role="group" aria-label="K 線顯示範圍">
@@ -67,7 +70,39 @@
       <small>拖曳底部滑桿兩端可縮放；拖曳中間可移動視窗</small>
     </div>
     <div v-if="!candleRows.length" class="no-data">目前沒有此週期的有效 K 線資料。</div>
-    <div ref="priceChart" class="chart-container" :class="{ hidden: !candleRows.length }"></div>
+    <!-- 極值使用 ECharts scatter series，直接綁定價格 grid，避免 convertToPixel finder 失敗。 -->
+    <div class="chart-shell">
+      <div ref="priceChart" class="chart-container" :class="{ hidden: !candleRows.length }"></div>
+    </div>
+    <!-- 使用原生 pointer events 控制可見範圍，避免 ECharts slider 在部分版本無法拖曳。 -->
+    <div v-if="candleRows.length" class="native-zoom" aria-label="K 線時間區間調整">
+      <span class="zoom-label">時間區間拖曳</span>
+      <div ref="zoomTrack" class="zoom-track" @pointerdown="onTrackPointerDown">
+        <div
+          class="zoom-selection"
+          :style="selectionStyle"
+          @pointerdown.stop="startZoomDrag($event, 'window')"
+        ></div>
+        <button
+          type="button"
+          class="zoom-handle start"
+          :style="startHandleStyle"
+          aria-label="拖曳左端調整開始日期"
+          @pointerdown.stop="startZoomDrag($event, 'start')"
+        ></button>
+        <button
+          type="button"
+          class="zoom-handle end"
+          :style="endHandleStyle"
+          aria-label="拖曳右端調整結束日期"
+          @pointerdown.stop="startZoomDrag($event, 'end')"
+        ></button>
+      </div>
+      <div class="zoom-dates">
+        <span>{{ visibleExtremes?.startDate }}</span
+        ><span>{{ visibleExtremes?.endDate }}</span>
+      </div>
+    </div>
   </section>
 </template>
 
@@ -128,6 +163,13 @@
         zoomEnd: 100,
         zoomContext: '',
         onZoom: null,
+        onAxisPointer: null,
+        onChartHover: null,
+        onGlobalOut: null,
+        hoverIndex: null,
+        dragState: null,
+        extremeFrame: null,
+        lastExtremeKey: '',
       }
     },
     computed: {
@@ -168,11 +210,30 @@
       latest() {
         return this.candleRows[this.candleRows.length - 1] ?? null
       },
+      displayRow() {
+        return this.hoverIndex == null
+          ? this.latest
+          : (this.candleRows[this.hoverIndex] ?? this.latest)
+      },
       kdRows() {
         return calculateKD(this.candleRows)
       },
       latestKd() {
         return this.kdRows[this.kdRows.length - 1] ?? null
+      },
+      displayKd() {
+        return this.hoverIndex == null
+          ? this.latestKd
+          : (this.kdRows[this.hoverIndex] ?? this.latestKd)
+      },
+      selectionStyle() {
+        return { left: `${this.zoomStart}%`, width: `${this.zoomEnd - this.zoomStart}%` }
+      },
+      startHandleStyle() {
+        return { left: `${this.zoomStart}%` }
+      },
+      endHandleStyle() {
+        return { left: `${this.zoomEnd}%` }
       },
       visibleExtremes() {
         const rows = this.candleRows
@@ -186,14 +247,17 @@
           endDate: visible[visible.length - 1].date,
           high: max.high,
           highDate: max.date,
+          highIndex: rows.indexOf(max),
           low: min.low,
           lowDate: min.date,
+          lowIndex: rows.indexOf(min),
         }
       },
     },
     watch: {
       candleRows: {
         handler() {
+          this.hoverIndex = null
           this.$nextTick(() => this.renderChart())
         },
         immediate: false,
@@ -212,38 +276,157 @@
         let end = Number(payload?.end)
         // 不同 ECharts 版本、滑鼠/滑桿操作可能不帶百分比，從當前 option 補取。
         if (!Number.isFinite(start) || !Number.isFinite(end)) {
-          const zoom = this.priceChart.getOption()?.dataZoom?.find((z) => z.id === 'zoom-slider')
+          const zoom = this.priceChart.getOption()?.dataZoom?.find((z) => z.id === 'zoom-inside')
           start = Number(zoom?.start)
           end = Number(zoom?.end)
         }
         if (!Number.isFinite(start) || !Number.isFinite(end)) return
         this.zoomStart = Math.max(0, Math.min(100, start))
         this.zoomEnd = Math.max(this.zoomStart, Math.min(100, end))
+        this.scheduleExtremes()
       }
       this.priceChart.on('datazoom', this.onZoom)
+      // 移動十字線時更新上方 KD；不呼叫 setOption，避免破壞 slider 狀態。
+      this.onAxisPointer = (event) => {
+        const axis =
+          event?.axesInfo?.find((item) => item.axisDim === 'x' && item.axisIndex === 0) ??
+          event?.axesInfo?.find((item) => item.axisDim === 'x')
+        const rawIndex = axis?.value
+        if (rawIndex == null) return
+        let index = Number(rawIndex)
+        if (!Number.isInteger(index))
+          index = this.candleRows.findIndex((row) => row.date === rawIndex)
+        if (index >= 0 && index < this.candleRows.length) this.hoverIndex = index
+      }
+      this.onChartHover = (params) => {
+        if (Number.isInteger(params?.dataIndex) && params.dataIndex < this.candleRows.length) {
+          this.hoverIndex = params.dataIndex
+        }
+      }
+      this.onGlobalOut = () => {
+        this.hoverIndex = null
+      }
+      this.priceChart.on('updateAxisPointer', this.onAxisPointer)
+      this.priceChart.on('mouseover', this.onChartHover)
+      this.priceChart.getZr().on('globalout', this.onGlobalOut)
       this.renderChart()
       if (typeof ResizeObserver !== 'undefined') {
-        this.resizeObserver = new ResizeObserver(() => this.priceChart?.resize())
+        this.resizeObserver = new ResizeObserver(() => {
+          this.priceChart?.resize()
+          this.scheduleExtremes()
+        })
         this.resizeObserver.observe(this.$refs.priceChart)
       }
     },
     beforeUnmount() {
       this.resizeObserver?.disconnect()
       if (this.onZoom && this.priceChart) this.priceChart.off('datazoom', this.onZoom)
+      if (this.onAxisPointer && this.priceChart)
+        this.priceChart.off('updateAxisPointer', this.onAxisPointer)
+      if (this.onChartHover && this.priceChart) this.priceChart.off('mouseover', this.onChartHover)
+      if (this.onGlobalOut && this.priceChart)
+        this.priceChart.getZr().off('globalout', this.onGlobalOut)
+      this.stopZoomDrag()
+      if (this.extremeFrame !== null) cancelAnimationFrame(this.extremeFrame)
+      this.extremeFrame = null
       this.priceChart?.dispose()
       this.priceChart = null
     },
     methods: {
+      /**
+       * 將可見區間高低點更新到 ECharts scatter series。
+       * Scatter 與 K 線共用 xAxisIndex=0/yAxisIndex=0，所以 ECharts 自行定位
+       * 在影線價格。整個過程不用 convertToPixel、markPoint 或重建主圖。
+       */
+      scheduleExtremes() {
+        if (this.extremeFrame !== null) cancelAnimationFrame(this.extremeFrame)
+        this.extremeFrame = requestAnimationFrame(() => {
+          this.extremeFrame = null
+          this.updateExtremeSeries()
+        })
+      },
+      updateExtremeSeries() {
+        const chart = this.priceChart
+        const range = this.visibleExtremes
+        if (!chart || chart.isDisposed() || !range) return
+        const key = `${this.zoomContext}:${range.highIndex}:${range.high}:${range.lowIndex}:${range.low}`
+        if (key === this.lastExtremeKey) return
+        this.lastExtremeKey = key
+        chart.setOption({
+          series: [
+            {
+              id: 'visible-high',
+              type: 'scatter',
+              xAxisIndex: 0,
+              yAxisIndex: 0,
+              data: [[range.highDate, range.high]],
+            },
+            {
+              id: 'visible-low',
+              type: 'scatter',
+              xAxisIndex: 0,
+              yAxisIndex: 0,
+              data: [[range.lowDate, range.low]],
+            },
+          ],
+        })
+      },
       selectView(view) {
         this.selectedView = view
+      },
+      pointerPercent(event) {
+        const track = this.$refs.zoomTrack
+        if (!track) return null
+        const rect = track.getBoundingClientRect()
+        if (!rect.width) return null
+        return Math.max(0, Math.min(100, ((event.clientX - rect.left) / rect.width) * 100))
+      },
+      onTrackPointerDown(event) {
+        const p = this.pointerPercent(event)
+        if (p == null) return
+        const distStart = Math.abs(p - this.zoomStart)
+        const distEnd = Math.abs(p - this.zoomEnd)
+        this.startZoomDrag(event, distStart < distEnd ? 'start' : 'end')
+      },
+      startZoomDrag(event, mode) {
+        if (event.button !== 0) return
+        event.preventDefault()
+        const p = this.pointerPercent(event)
+        if (p == null) return
+        this.dragState = { mode, origin: p, start: this.zoomStart, end: this.zoomEnd }
+        window.addEventListener('pointermove', this.moveZoomDrag)
+        window.addEventListener('pointerup', this.stopZoomDrag)
+        window.addEventListener('pointercancel', this.stopZoomDrag)
+      },
+      moveZoomDrag(event) {
+        if (!this.dragState) return
+        const p = this.pointerPercent(event)
+        if (p == null) return
+        const { mode, origin, start, end } = this.dragState
+        const minGap = Math.min(100, 100 / Math.max(1, this.candleRows.length))
+        if (mode === 'start') this.setZoom(Math.min(end - minGap, p), end)
+        else if (mode === 'end') this.setZoom(start, Math.max(start + minGap, p))
+        else {
+          const width = end - start
+          const nextStart = Math.max(0, Math.min(100 - width, start + p - origin))
+          this.setZoom(nextStart, nextStart + width)
+        }
+      },
+      stopZoomDrag() {
+        this.dragState = null
+        window.removeEventListener('pointermove', this.moveZoomDrag)
+        window.removeEventListener('pointerup', this.stopZoomDrag)
+        window.removeEventListener('pointercancel', this.stopZoomDrag)
       },
       setZoom(start, end) {
         this.zoomStart = Math.max(0, Math.min(100, start))
         this.zoomEnd = Math.max(this.zoomStart, Math.min(100, end))
+        this.scheduleExtremes()
         if (this.priceChart && !this.priceChart.isDisposed()) {
           // 同時更新 inside / slider；不重建 ECharts instance。
           this.priceChart.dispatchAction({
             type: 'dataZoom',
+            dataZoomId: 'zoom-inside',
             start: this.zoomStart,
             end: this.zoomEnd,
           })
@@ -271,6 +454,7 @@
         const rows = this.candleRows
         if (!rows.length) {
           chart.clear()
+          this.lastExtremeKey = ''
           return
         }
         const dates = rows.map((r) => r.date)
@@ -291,6 +475,8 @@
         }
         const zoomStart = this.zoomStart
         const zoomEnd = this.zoomEnd
+        this.lastExtremeKey = ''
+        const extremes = this.visibleExtremes
         const text = '#9daeba'
         const gridLine = 'rgba(161,181,196,.11)'
         chart.setOption(
@@ -411,27 +597,6 @@
                 moveOnMouseMove: true,
                 throttle: 50,
               },
-              {
-                id: 'zoom-slider',
-                type: 'slider',
-                xAxisIndex: [0, 1, 2],
-                bottom: 7,
-                height: 28,
-                start: zoomStart,
-                end: zoomEnd,
-                filterMode: 'none',
-                realtime: true,
-                brushSelect: false,
-                showDataShadow: false,
-                showDetail: false,
-                borderColor: '#42535f',
-                backgroundColor: '#111922',
-                fillerColor: 'rgba(83,155,184,.22)',
-                handleSize: '90%',
-                handleStyle: { color: '#83becb', borderColor: '#a5d8df' },
-                moveHandleStyle: { color: '#6d99a8' },
-                textStyle: { color: text },
-              },
             ],
             series: [
               {
@@ -492,11 +657,70 @@
                 lineStyle: { width: 1.5, color: '#ffc460' },
                 itemStyle: { color: '#ffc460' },
               },
+              // 區間最高與最低直接用價格 grid 的 scatter 定位（不是 markPoint）。
+              {
+                id: 'visible-high',
+                name: '區間最高',
+                type: 'scatter',
+                xAxisIndex: 0,
+                yAxisIndex: 0,
+                silent: true,
+                z: 30,
+                symbol: 'circle',
+                symbolSize: 8,
+                itemStyle: { color: '#ff7e85', borderColor: '#14202a', borderWidth: 1 },
+                data: extremes ? [[extremes.highDate, extremes.high]] : [],
+                label: {
+                  show: true,
+                  position: 'top',
+                  distance: 10,
+                  formatter: (params) => `最高 ${Number(params.value[1]).toLocaleString('zh-TW')}`,
+                  color: '#ffb5b9',
+                  fontSize: 12,
+                  fontWeight: 'bold',
+                  backgroundColor: '#14202a',
+                  borderColor: '#92515a',
+                  borderWidth: 1,
+                  borderRadius: 5,
+                  padding: [5, 7],
+                },
+                emphasis: { disabled: true },
+              },
+              {
+                id: 'visible-low',
+                name: '區間最低',
+                type: 'scatter',
+                xAxisIndex: 0,
+                yAxisIndex: 0,
+                silent: true,
+                z: 30,
+                symbol: 'circle',
+                symbolSize: 8,
+                itemStyle: { color: '#55d9ab', borderColor: '#14202a', borderWidth: 1 },
+                data: extremes ? [[extremes.lowDate, extremes.low]] : [],
+                label: {
+                  show: true,
+                  position: 'bottom',
+                  distance: 10,
+                  formatter: (params) => `最低 ${Number(params.value[1]).toLocaleString('zh-TW')}`,
+                  color: '#8ce9c5',
+                  fontSize: 12,
+                  fontWeight: 'bold',
+                  backgroundColor: '#14202a',
+                  borderColor: '#377662',
+                  borderWidth: 1,
+                  borderRadius: 5,
+                  padding: [5, 7],
+                },
+                emphasis: { disabled: true },
+              },
             ],
           },
           { notMerge: true, lazyUpdate: false },
         )
-        this.$nextTick(() => chart.resize())
+        this.$nextTick(() => {
+          chart.resize()
+        })
       },
     },
   }
@@ -558,6 +782,16 @@
     color: #e7eff6;
     margin-left: 6px;
   }
+  .quote-strip .quote-focus {
+    font-weight: 700;
+    color: #9cf1cb;
+  }
+  .quote-strip .high-price {
+    color: #ff7c80;
+  }
+  .quote-strip .low-price {
+    color: #58d5ad;
+  }
   .range-strip {
     display: flex;
     flex-wrap: wrap;
@@ -608,6 +842,11 @@
   .zoom-toolbar small {
     color: #849cac;
   }
+  .chart-shell {
+    position: relative;
+    width: 100%;
+    min-width: 0;
+  }
   .chart-container {
     height: 660px;
     width: 100%;
@@ -628,6 +867,65 @@
     }
     .chart-container {
       height: 540px;
+    }
+  }
+  .native-zoom {
+    padding: 3px 64px 8px;
+    user-select: none;
+    touch-action: none;
+  }
+  .zoom-label {
+    display: block;
+    font-size: 11px;
+    color: #91aabb;
+    margin-bottom: 9px;
+  }
+  .zoom-track {
+    position: relative;
+    height: 23px;
+    background: #101922;
+    border: 1px solid #3c5465;
+    border-radius: 6px;
+    cursor: pointer;
+    touch-action: none;
+  }
+  .zoom-selection {
+    position: absolute;
+    top: 1px;
+    bottom: 1px;
+    background: rgba(100, 179, 204, 0.27);
+    border: 1px solid #528ba3;
+    box-sizing: border-box;
+    cursor: grab;
+    touch-action: none;
+  }
+  .zoom-selection:active {
+    cursor: grabbing;
+  }
+  .zoom-handle {
+    position: absolute;
+    top: -4px;
+    transform: translateX(-50%);
+    height: 30px;
+    width: 12px;
+    border-radius: 4px;
+    border: 1px solid #bee5ee;
+    background: #79b5cd;
+    cursor: ew-resize;
+    touch-action: none;
+    z-index: 3;
+    padding: 0;
+  }
+  .zoom-dates {
+    display: flex;
+    justify-content: space-between;
+    color: #829aab;
+    font-size: 11px;
+    margin-top: 6px;
+  }
+  @media (max-width: 700px) {
+    .native-zoom {
+      padding: 3px 16px 8px;
     }
   }
 </style>
