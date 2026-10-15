@@ -3,145 +3,163 @@
     <header class="kline-head">
       <div>
         <h2>{{ selectedStockCode }} 股價走勢</h2>
-        <p>價格、均線與成交量</p>
+        <p>價格 · 均線 · 成交量 · KD（按住圖表左右拖曳時間範圍）</p>
       </div>
-      <div class="period-tabs" role="group" aria-label="K線週期">
+      <div class="period-tabs" aria-label="K 線週期">
         <button
-          v-for="period in periods"
-          :key="period.id"
+          v-for="p in periods"
+          :key="p.id"
           type="button"
-          :class="{ active: selectedView === period.id }"
-          :aria-pressed="selectedView === period.id"
-          @click="selectView(period.id)"
+          :class="{ active: selectedView === p.id }"
+          :aria-pressed="selectedView === p.id"
+          @click="changePeriod(p.id)"
         >
-          {{ period.name }}
+          {{ p.name }}
         </button>
       </div>
     </header>
-    <!-- OHLC 與成交量依十字線所在 K 棒更新，離開圖表則顯示最新交易日。 -->
+
     <div v-if="displayRow" class="quote-strip">
-      <span class="quote-focus">{{ hoverIndex === null ? '最新一根' : '游標位置' }}</span>
+      <strong class="focus">{{ hoverIndex === null ? '最新一根' : '游標位置' }}</strong>
       <span
         >日期 <b>{{ displayRow.date }}</b></span
       >
       <span
-        >開盤 <b>{{ formatPrice(displayRow.open) }}</b></span
+        >開 <b>{{ fmt(displayRow.open) }}</b></span
       >
       <span
-        >最高 <b class="high-price">{{ formatPrice(displayRow.high) }}</b></span
+        >高 <b class="high">{{ fmt(displayRow.high) }}</b></span
       >
       <span
-        >最低 <b class="low-price">{{ formatPrice(displayRow.low) }}</b></span
+        >低 <b class="low">{{ fmt(displayRow.low) }}</b></span
       >
       <span
-        >收盤 <b>{{ formatPrice(displayRow.close) }}</b></span
+        >收 <b>{{ fmt(displayRow.close) }}</b></span
       >
       <span
-        >成交量 <b>{{ formatVolume(displayRow.volume) }}</b></span
+        >量 <b>{{ volumeFmt(displayRow.volume) }}</b></span
+      >
+      <span v-if="displayKd"
+        >K <b>{{ fmt(displayKd.k) }}</b> · D <b>{{ fmt(displayKd.d) }}</b> · J
+        <b>{{ fmt(displayKd.j) }}</b></span
       >
     </div>
+
     <div v-if="visibleExtremes" class="range-strip">
       <span
         >可見區間 <b>{{ visibleExtremes.startDate }} ～ {{ visibleExtremes.endDate }}</b></span
       >
       <span
-        >最高 <b class="high-price">{{ formatPrice(visibleExtremes.high) }}</b>
+        >最高 <b class="high">{{ fmt(visibleExtremes.high) }}</b>
         <small>{{ visibleExtremes.highDate }}</small></span
       >
       <span
-        >最低 <b class="low-price">{{ formatPrice(visibleExtremes.low) }}</b>
+        >最低 <b class="low">{{ fmt(visibleExtremes.low) }}</b>
         <small>{{ visibleExtremes.lowDate }}</small></span
       >
-      <span v-if="displayKd"
-        >KD (9,3,3)
-        <b
-          >K {{ formatPrice(displayKd.k) }} · D {{ formatPrice(displayKd.d) }} · J
-          {{ formatPrice(displayKd.j) }}</b
-        >
-        <small>{{ hoverIndex === null ? '最新一根' : candleRows[hoverIndex]?.date }}</small></span
-      >
     </div>
-    <div v-if="candleRows.length" class="zoom-toolbar" role="group" aria-label="K 線顯示範圍">
-      <span>顯示範圍</span>
-      <button type="button" @click="showRecent(30)">最近 30 根</button>
-      <button type="button" @click="showRecent(60)">最近 60 根</button>
-      <button type="button" @click="showRecent(90)">最近 90 根</button>
-      <button type="button" @click="showAll">全部</button>
-      <small>拖曳底部滑桿兩端可縮放；拖曳中間可移動視窗</small>
-    </div>
-    <div v-if="!candleRows.length" class="no-data">目前沒有此週期的有效 K 線資料。</div>
-    <!-- 極值使用 ECharts scatter series，直接綁定價格 grid，避免 convertToPixel finder 失敗。 -->
-    <div class="chart-shell">
-      <div ref="priceChart" class="chart-container" :class="{ hidden: !candleRows.length }"></div>
-    </div>
-    <!-- 使用原生 pointer events 控制可見範圍，避免 ECharts slider 在部分版本無法拖曳。 -->
-    <div v-if="candleRows.length" class="native-zoom" aria-label="K 線時間區間調整">
-      <span class="zoom-label">時間區間拖曳</span>
-      <div ref="zoomTrack" class="zoom-track" @pointerdown="onTrackPointerDown">
+
+    <div v-if="candleRows.length" class="deduction-strip" aria-label="均線扣抵價">
+      <div class="deduction-heading">
+        <strong>MA 扣抵價</strong>
+        <small>下一根 K 棒將從均線計算中移出的收盤價（可在圖中找到同色標記）</small>
+      </div>
+      <div class="deduction-list">
         <div
-          class="zoom-selection"
-          :style="selectionStyle"
-          @pointerdown.stop="startZoomDrag($event, 'window')"
-        ></div>
-        <button
-          type="button"
-          class="zoom-handle start"
-          :style="startHandleStyle"
-          aria-label="拖曳左端調整開始日期"
-          @pointerdown.stop="startZoomDrag($event, 'start')"
-        ></button>
-        <button
-          type="button"
-          class="zoom-handle end"
-          :style="endHandleStyle"
-          aria-label="拖曳右端調整結束日期"
-          @pointerdown.stop="startZoomDrag($event, 'end')"
-        ></button>
-      </div>
-      <div class="zoom-dates">
-        <span>{{ visibleExtremes?.startDate }}</span
-        ><span>{{ visibleExtremes?.endDate }}</span>
+          v-for="d in latestDeductions"
+          :key="d.period"
+          class="deduction-chip"
+          :style="{ '--ma-color': d.color }"
+        >
+          <b>MA{{ d.period }}</b>
+          <span>{{ d.value === null ? '資料不足' : fmt(d.value) }}</span>
+          <small>{{ d.date || '—' }}</small>
+        </div>
       </div>
     </div>
+
+    <div v-if="candleRows.length" class="zoom-toolbar">
+      <span>顯示範圍</span>
+      <div class="zoom-actions" aria-label="以目前視窗中心縮放">
+        <button
+          type="button"
+          class="zoom-action"
+          aria-label="放大目前可見時間範圍"
+          @click="zoomAroundCenter('in')"
+        >
+          ＋ 放大
+        </button>
+        <button
+          type="button"
+          class="zoom-action"
+          aria-label="縮小目前可見時間範圍"
+          @click="zoomAroundCenter('out')"
+        >
+          － 縮小
+        </button>
+      </div>
+      <button v-for="n in [30, 60, 90]" :key="n" type="button" @click="showRecent(n)">
+        最近 {{ n }} 根
+      </button>
+      <button type="button" @click="setZoom(0, 100)">全部</button>
+      <small>以視窗中央縮放；按住圖表左右拖曳平移；滾輪維持頁面捲動</small>
+    </div>
+
+    <div v-if="!candleRows.length" class="no-data">此週期目前沒有有效 K 線資料。</div>
+    <div ref="priceChart" class="chart-container" :class="{ empty: !candleRows.length }"></div>
   </section>
 </template>
 
 <script>
   import * as echarts from 'echarts'
 
-  const numeric = (v) => {
+  const MA_PERIODS = [5, 10, 20, 60]
+  const MA_COLORS = { 5: '#fa646b', 10: '#63a6ff', 20: '#96d17e', 60: '#ffc15d' }
+  const toNumber = (v) => {
     if (v === null || v === undefined || String(v).trim() === '') return null
     const n = Number(String(v).replace(/,/g, ''))
     return Number.isFinite(n) ? n : null
   }
-  const niceDate = (v) => String(v ?? '').trim()
-
-  // KD (9,3,3)：依所選的日／週／月 K 獨立計算，初始 K/D = 50。
-  function calculateKD(rows, period = 9) {
-    let previousK = 50
-    let previousD = 50
-    return rows.map((row, index) => {
-      const window = rows.slice(Math.max(0, index - period + 1), index + 1)
-      const highest = Math.max(...window.map((r) => r.high))
-      const lowest = Math.min(...window.map((r) => r.low))
-      const rsv =
-        highest === lowest
-          ? 50
-          : Math.min(100, Math.max(0, ((row.close - lowest) / (highest - lowest)) * 100))
-      const k = (2 * previousK + rsv) / 3
-      const d = (2 * previousD + k) / 3
-      previousK = k
-      previousD = d
+  const clamp = (n, lo, hi) => Math.max(lo, Math.min(hi, n))
+  const format = (value, decimals = 2) =>
+    value == null ? '—' : Number(value).toLocaleString('zh-TW', { maximumFractionDigits: decimals })
+  // KD 使用各週期的高低收價格獨立計算。
+  function kdSeries(rows) {
+    let k = 50,
+      d = 50
+    return rows.map((r, i) => {
+      let hi = -Infinity,
+        lo = Infinity
+      for (let j = Math.max(0, i - 8); j <= i; j++) {
+        hi = Math.max(hi, rows[j].high)
+        lo = Math.min(lo, rows[j].low)
+      }
+      const rsv = hi === lo ? 50 : clamp(((r.close - lo) / (hi - lo)) * 100, 0, 100)
+      k = (k * 2) / 3 + rsv / 3
+      d = (d * 2) / 3 + k / 3
       return { k, d, j: 3 * k - 2 * d }
     })
   }
-
-  function visibleIndices(length, start, end) {
+  // 下一根 K 棒更新 MA(N) 時，將離開計算視窗的是目前最近 N 根的第一根。
+  function deductedClose(rows, n, atIndex) {
+    const index = atIndex - n + 1
+    if (index < 0 || index >= rows.length)
+      return { period: n, value: null, date: '', index: -1, color: MA_COLORS[n] }
+    return {
+      period: n,
+      value: rows[index].close,
+      date: rows[index].date,
+      index,
+      color: MA_COLORS[n],
+    }
+  }
+  function visibleRange(length, start, end) {
     if (!length) return [0, 0]
-    const a = Math.max(0, Math.min(length - 1, Math.floor(((start ?? 0) / 100) * (length - 1))))
-    const b = Math.max(a, Math.min(length - 1, Math.ceil(((end ?? 100) / 100) * (length - 1))))
+    const a = clamp(Math.floor((start / 100) * (length - 1)), 0, length - 1)
+    const b = clamp(Math.ceil((end / 100) * (length - 1)), a, length - 1)
     return [a, b]
   }
+
   export default {
     name: 'Candlestick',
     props: {
@@ -157,369 +175,435 @@
           { id: 'week', name: '週 K' },
           { id: 'month', name: '月 K' },
         ],
-        priceChart: null,
-        resizeObserver: null,
+        chart: null,
+        observer: null,
+        hoverIndex: null,
         zoomStart: 0,
         zoomEnd: 100,
         zoomContext: '',
+        extremesTimer: null,
+        resizeFrame: null,
         onZoom: null,
         onAxisPointer: null,
         onChartHover: null,
         onGlobalOut: null,
-        hoverIndex: null,
-        dragState: null,
-        extremeFrame: null,
-        lastExtremeKey: '',
+        onZrMove: null,
       }
     },
     computed: {
       candleRows() {
-        const prop = {
+        const key = {
           day: 'singleStockDayPriceVos',
           week: 'singleStockWeekPriceVos',
           month: 'singleStockMonthPriceVos',
         }[this.selectedView]
-        const source = this.stockData?.[prop]
-        if (!Array.isArray(source)) return []
-        return source
-          .flatMap((item) => {
-            if (!item || typeof item !== 'object') return []
-            const open = numeric(item.openingPrice)
-            const close = numeric(item.closingPrice)
-            const low = numeric(item.lowPrice)
-            const high = numeric(item.highPrice)
-            const date = niceDate(item.firstTradingDate || item.tradingDate)
-            if (!date || [open, close, low, high].some((n) => n === null)) return []
+        const list = this.stockData?.[key]
+        if (!Array.isArray(list)) return []
+        return list
+          .flatMap((r) => {
+            const open = toNumber(r?.openingPrice),
+              close = toNumber(r?.closingPrice)
+            const high = toNumber(r?.highPrice),
+              low = toNumber(r?.lowPrice)
+            const date = String(r?.firstTradingDate || r?.tradingDate || '').trim()
+            if (!date || [open, close, high, low].some((v) => v === null)) return []
             return [
               {
                 date,
                 open,
                 close,
-                low,
                 high,
-                volume: numeric(item.tradingVolume),
-                ma5: numeric(item.fiveMa),
-                ma10: numeric(item.tenMa),
-                ma20: numeric(item.twentyMa),
-                ma60: numeric(item.sixtyMa),
+                low,
+                volume: toNumber(r.tradingVolume),
+                ma5: toNumber(r.fiveMa),
+                ma10: toNumber(r.tenMa),
+                ma20: toNumber(r.twentyMa),
+                ma60: toNumber(r.sixtyMa),
               },
             ]
           })
           .sort((a, b) => a.date.localeCompare(b.date))
       },
-      latest() {
-        return this.candleRows[this.candleRows.length - 1] ?? null
+      kdRows() {
+        return kdSeries(this.candleRows)
       },
       displayRow() {
         return this.hoverIndex == null
-          ? this.latest
-          : (this.candleRows[this.hoverIndex] ?? this.latest)
-      },
-      kdRows() {
-        return calculateKD(this.candleRows)
-      },
-      latestKd() {
-        return this.kdRows[this.kdRows.length - 1] ?? null
+          ? this.candleRows.at(-1)
+          : this.candleRows[this.hoverIndex] || this.candleRows.at(-1)
       },
       displayKd() {
         return this.hoverIndex == null
-          ? this.latestKd
-          : (this.kdRows[this.hoverIndex] ?? this.latestKd)
+          ? this.kdRows.at(-1)
+          : this.kdRows[this.hoverIndex] || this.kdRows.at(-1)
       },
-      selectionStyle() {
-        return { left: `${this.zoomStart}%`, width: `${this.zoomEnd - this.zoomStart}%` }
-      },
-      startHandleStyle() {
-        return { left: `${this.zoomStart}%` }
-      },
-      endHandleStyle() {
-        return { left: `${this.zoomEnd}%` }
+      latestDeductions() {
+        return MA_PERIODS.map((n) => deductedClose(this.candleRows, n, this.candleRows.length - 1))
       },
       visibleExtremes() {
         const rows = this.candleRows
         if (!rows.length) return null
-        const [a, b] = visibleIndices(rows.length, this.zoomStart, this.zoomEnd)
-        const visible = rows.slice(a, b + 1)
-        const max = visible.reduce((best, row) => (row.high > best.high ? row : best), visible[0])
-        const min = visible.reduce((best, row) => (row.low < best.low ? row : best), visible[0])
+        const [a, b] = visibleRange(rows.length, this.zoomStart, this.zoomEnd)
+        let highest = a,
+          lowest = a
+        for (let i = a + 1; i <= b; i++) {
+          if (rows[i].high > rows[highest].high) highest = i
+          if (rows[i].low < rows[lowest].low) lowest = i
+        }
         return {
-          startDate: visible[0].date,
-          endDate: visible[visible.length - 1].date,
-          high: max.high,
-          highDate: max.date,
-          highIndex: rows.indexOf(max),
-          low: min.low,
-          lowDate: min.date,
-          lowIndex: rows.indexOf(min),
+          startDate: rows[a].date,
+          endDate: rows[b].date,
+          high: rows[highest].high,
+          highDate: rows[highest].date,
+          highIndex: highest,
+          low: rows[lowest].low,
+          lowDate: rows[lowest].date,
+          lowIndex: lowest,
         }
       },
     },
     watch: {
-      candleRows: {
-        handler() {
-          this.hoverIndex = null
-          this.$nextTick(() => this.renderChart())
-        },
-        immediate: false,
+      // 不監聽新的 computed 陣列物件，避免不必要的完整圖表重繪。
+      stockData() {
+        this.hoverIndex = null
+        this.$nextTick(() => this.renderChart())
+      },
+      selectedStockCode() {
+        this.hoverIndex = null
+        this.$nextTick(() => this.renderChart())
+      },
+      selectedView() {
+        this.hoverIndex = null
+        this.$nextTick(() => this.renderChart())
       },
       isKLineChart() {
-        this.$nextTick(() => this.priceChart?.resize())
+        this.$nextTick(() => this.chart?.resize())
       },
     },
     mounted() {
-      this.priceChart = echarts.init(this.$refs.priceChart, 'dark', { renderer: 'canvas' })
-      // 只同步可見範圍，不在 datazoom 回呼中重繪整張圖。
+      this.chart = echarts.init(this.$refs.priceChart, undefined, { renderer: 'canvas' })
       this.onZoom = (event) => {
-        if (!this.priceChart || this.priceChart.isDisposed()) return
         const payload = event?.batch?.[0] ?? event
-        let start = Number(payload?.start)
-        let end = Number(payload?.end)
-        // 不同 ECharts 版本、滑鼠/滑桿操作可能不帶百分比，從當前 option 補取。
-        if (!Number.isFinite(start) || !Number.isFinite(end)) {
-          const zoom = this.priceChart.getOption()?.dataZoom?.find((z) => z.id === 'zoom-inside')
-          start = Number(zoom?.start)
-          end = Number(zoom?.end)
+        let a = Number(payload?.start),
+          b = Number(payload?.end)
+        if (!Number.isFinite(a) || !Number.isFinite(b)) {
+          const z = this.chart?.getOption()?.dataZoom?.find((item) => item.id === 'zoom-inside')
+          a = Number(z?.start)
+          b = Number(z?.end)
         }
-        if (!Number.isFinite(start) || !Number.isFinite(end)) return
-        this.zoomStart = Math.max(0, Math.min(100, start))
-        this.zoomEnd = Math.max(this.zoomStart, Math.min(100, end))
-        this.scheduleExtremes()
+        if (!Number.isFinite(a) || !Number.isFinite(b)) return
+        const nextA = clamp(a, 0, 100),
+          nextB = clamp(b, nextA, 100)
+        if (Math.abs(nextA - this.zoomStart) < 0.0001 && Math.abs(nextB - this.zoomEnd) < 0.0001)
+          return
+        this.zoomStart = nextA
+        this.zoomEnd = nextB
+        // 不在 dataZoom 回呼中同步 setOption，避免 render-loop 與拖曳卡頓。
+        this.queueExtremeUpdate()
       }
-      this.priceChart.on('datazoom', this.onZoom)
-      // 移動十字線時更新上方 KD；不呼叫 setOption，避免破壞 slider 狀態。
       this.onAxisPointer = (event) => {
         const axis =
-          event?.axesInfo?.find((item) => item.axisDim === 'x' && item.axisIndex === 0) ??
-          event?.axesInfo?.find((item) => item.axisDim === 'x')
-        const rawIndex = axis?.value
-        if (rawIndex == null) return
-        let index = Number(rawIndex)
-        if (!Number.isInteger(index))
-          index = this.candleRows.findIndex((row) => row.date === rawIndex)
-        if (index >= 0 && index < this.candleRows.length) this.hoverIndex = index
+          event?.axesInfo?.find((x) => x.axisDim === 'x' && x.axisIndex === 0) ||
+          event?.axesInfo?.find((x) => x.axisDim === 'x')
+        const value = axis?.value
+        if (value == null) return
+        let i = Number(value)
+        if (!Number.isInteger(i)) i = this.candleRows.findIndex((r) => r.date === value)
+        if (i >= 0 && i < this.candleRows.length && i !== this.hoverIndex) this.hoverIndex = i
       }
-      this.onChartHover = (params) => {
-        if (Number.isInteger(params?.dataIndex) && params.dataIndex < this.candleRows.length) {
-          this.hoverIndex = params.dataIndex
+      this.onChartHover = (p) => {
+        if (
+          Number.isInteger(p?.dataIndex) &&
+          p.dataIndex >= 0 &&
+          p.dataIndex < this.candleRows.length &&
+          this.hoverIndex !== p.dataIndex
+        )
+          this.hoverIndex = p.dataIndex
+      }
+      // 滑鼠移動到任何一根 K 棒所在的價格格線時，也要即時更新摘要。
+      // 不執行 setOption，避免滑鼠移動造成整張圖重新渲染。
+      this.onZrMove = (event) => {
+        const chart = this.chart
+        if (!chart || chart.isDisposed() || !this.candleRows.length) return
+        const x = event.offsetX,
+          y = event.offsetY
+        if (!Number.isFinite(x) || !Number.isFinite(y)) return
+        if (!chart.containPixel({ gridIndex: 0 }, [x, y])) return
+        try {
+          const point = chart.convertFromPixel({ seriesIndex: 0 }, [x, y])
+          if (!Array.isArray(point)) return
+          const index = Math.round(Number(point[0]))
+          if (
+            Number.isInteger(index) &&
+            index >= 0 &&
+            index < this.candleRows.length &&
+            index !== this.hoverIndex
+          ) {
+            this.hoverIndex = index
+          }
+        } catch (_) {
+          /* 圖表尚未建立座標軸時不更新 */
         }
       }
       this.onGlobalOut = () => {
         this.hoverIndex = null
       }
-      this.priceChart.on('updateAxisPointer', this.onAxisPointer)
-      this.priceChart.on('mouseover', this.onChartHover)
-      this.priceChart.getZr().on('globalout', this.onGlobalOut)
-      this.renderChart()
+      this.chart.on('datazoom', this.onZoom)
+      this.chart.on('updateAxisPointer', this.onAxisPointer)
+      this.chart.on('mouseover', this.onChartHover)
+      this.chart.getZr().on('globalout', this.onGlobalOut)
+      this.chart.getZr().on('mousemove', this.onZrMove)
+      this.$nextTick(() => this.renderChart())
       if (typeof ResizeObserver !== 'undefined') {
-        this.resizeObserver = new ResizeObserver(() => {
-          this.priceChart?.resize()
-          this.scheduleExtremes()
+        this.observer = new ResizeObserver(() => {
+          if (this.resizeFrame != null) return
+          this.resizeFrame = requestAnimationFrame(() => {
+            this.resizeFrame = null
+            if (!this.chart?.isDisposed()) this.chart?.resize()
+          })
         })
-        this.resizeObserver.observe(this.$refs.priceChart)
+        this.observer.observe(this.$refs.priceChart)
       }
     },
     beforeUnmount() {
-      this.resizeObserver?.disconnect()
-      if (this.onZoom && this.priceChart) this.priceChart.off('datazoom', this.onZoom)
-      if (this.onAxisPointer && this.priceChart)
-        this.priceChart.off('updateAxisPointer', this.onAxisPointer)
-      if (this.onChartHover && this.priceChart) this.priceChart.off('mouseover', this.onChartHover)
-      if (this.onGlobalOut && this.priceChart)
-        this.priceChart.getZr().off('globalout', this.onGlobalOut)
-      this.stopZoomDrag()
-      if (this.extremeFrame !== null) cancelAnimationFrame(this.extremeFrame)
-      this.extremeFrame = null
-      this.priceChart?.dispose()
-      this.priceChart = null
+      this.observer?.disconnect()
+      if (this.extremesTimer !== null) clearTimeout(this.extremesTimer)
+      if (this.resizeFrame !== null) cancelAnimationFrame(this.resizeFrame)
+      if (this.chart) {
+        this.chart.off('datazoom', this.onZoom)
+        this.chart.off('updateAxisPointer', this.onAxisPointer)
+        this.chart.off('mouseover', this.onChartHover)
+        this.chart.getZr().off('globalout', this.onGlobalOut)
+        this.chart.getZr().off('mousemove', this.onZrMove)
+        this.chart.dispose()
+      }
+      this.chart = null
     },
     methods: {
-      /**
-       * 將可見區間高低點更新到 ECharts scatter series。
-       * Scatter 與 K 線共用 xAxisIndex=0/yAxisIndex=0，所以 ECharts 自行定位
-       * 在影線價格。整個過程不用 convertToPixel、markPoint 或重建主圖。
-       */
-      scheduleExtremes() {
-        if (this.extremeFrame !== null) cancelAnimationFrame(this.extremeFrame)
-        this.extremeFrame = requestAnimationFrame(() => {
-          this.extremeFrame = null
-          this.updateExtremeSeries()
-        })
+      changePeriod(period) {
+        if (!this.periods.some((p) => p.id === period) || this.selectedView === period) return
+        this.selectedView = period
       },
-      updateExtremeSeries() {
-        const chart = this.priceChart
-        const range = this.visibleExtremes
-        if (!chart || chart.isDisposed() || !range) return
-        const key = `${this.zoomContext}:${range.highIndex}:${range.high}:${range.lowIndex}:${range.low}`
-        if (key === this.lastExtremeKey) return
-        this.lastExtremeKey = key
-        chart.setOption({
-          series: [
-            {
-              id: 'visible-high',
-              type: 'scatter',
-              xAxisIndex: 0,
-              yAxisIndex: 0,
-              data: [[range.highDate, range.high]],
-            },
-            {
-              id: 'visible-low',
-              type: 'scatter',
-              xAxisIndex: 0,
-              yAxisIndex: 0,
-              data: [[range.lowDate, range.low]],
-            },
-          ],
-        })
+      fmt(v) {
+        return format(v)
       },
-      selectView(view) {
-        this.selectedView = view
-      },
-      pointerPercent(event) {
-        const track = this.$refs.zoomTrack
-        if (!track) return null
-        const rect = track.getBoundingClientRect()
-        if (!rect.width) return null
-        return Math.max(0, Math.min(100, ((event.clientX - rect.left) / rect.width) * 100))
-      },
-      onTrackPointerDown(event) {
-        const p = this.pointerPercent(event)
-        if (p == null) return
-        const distStart = Math.abs(p - this.zoomStart)
-        const distEnd = Math.abs(p - this.zoomEnd)
-        this.startZoomDrag(event, distStart < distEnd ? 'start' : 'end')
-      },
-      startZoomDrag(event, mode) {
-        if (event.button !== 0) return
-        event.preventDefault()
-        const p = this.pointerPercent(event)
-        if (p == null) return
-        this.dragState = { mode, origin: p, start: this.zoomStart, end: this.zoomEnd }
-        window.addEventListener('pointermove', this.moveZoomDrag)
-        window.addEventListener('pointerup', this.stopZoomDrag)
-        window.addEventListener('pointercancel', this.stopZoomDrag)
-      },
-      moveZoomDrag(event) {
-        if (!this.dragState) return
-        const p = this.pointerPercent(event)
-        if (p == null) return
-        const { mode, origin, start, end } = this.dragState
-        const minGap = Math.min(100, 100 / Math.max(1, this.candleRows.length))
-        if (mode === 'start') this.setZoom(Math.min(end - minGap, p), end)
-        else if (mode === 'end') this.setZoom(start, Math.max(start + minGap, p))
-        else {
-          const width = end - start
-          const nextStart = Math.max(0, Math.min(100 - width, start + p - origin))
-          this.setZoom(nextStart, nextStart + width)
-        }
-      },
-      stopZoomDrag() {
-        this.dragState = null
-        window.removeEventListener('pointermove', this.moveZoomDrag)
-        window.removeEventListener('pointerup', this.stopZoomDrag)
-        window.removeEventListener('pointercancel', this.stopZoomDrag)
-      },
-      setZoom(start, end) {
-        this.zoomStart = Math.max(0, Math.min(100, start))
-        this.zoomEnd = Math.max(this.zoomStart, Math.min(100, end))
-        this.scheduleExtremes()
-        if (this.priceChart && !this.priceChart.isDisposed()) {
-          // 同時更新 inside / slider；不重建 ECharts instance。
-          this.priceChart.dispatchAction({
-            type: 'dataZoom',
-            dataZoomId: 'zoom-inside',
-            start: this.zoomStart,
-            end: this.zoomEnd,
-          })
-        }
-      },
-      showRecent(count) {
+      // 不必選中 K 棒：加減按鈕以當前可見區間中央為中心。
+      zoomAroundCenter(direction) {
         const length = this.candleRows.length
         if (!length) return
-        this.setZoom(Math.max(0, 100 * (1 - Math.min(length, count) / length)), 100)
+        const a = this.zoomStart
+        const b = this.zoomEnd
+        const width = Math.max(100 / length, b - a)
+        const minWidth = Math.min(100, (5 / length) * 100)
+        const nextWidth = clamp(width * (direction === 'in' ? 0.75 : 1.35), minWidth, 100)
+        if (Math.abs(nextWidth - width) < 0.001) return
+        const center = (a + b) / 2
+        const nextStart = clamp(center - nextWidth / 2, 0, 100 - nextWidth)
+        this.setZoom(nextStart, nextStart + nextWidth)
       },
-      showAll() {
-        this.setZoom(0, 100)
+      volumeFmt(v) {
+        return v == null ? '—' : Number(v).toLocaleString('zh-TW')
       },
-      formatPrice(value) {
-        return value == null
-          ? '—'
-          : Number(value).toLocaleString('zh-TW', { maximumFractionDigits: 2 })
+      queueExtremeUpdate() {
+        if (this.extremesTimer !== null) clearTimeout(this.extremesTimer)
+        this.extremesTimer = setTimeout(() => {
+          this.extremesTimer = null
+          this.updateExtremeMarkers()
+        }, 240)
       },
-      formatVolume(value) {
-        return value == null ? '—' : Number(value).toLocaleString('zh-TW')
+      updateExtremeMarkers() {
+        const c = this.chart,
+          e = this.visibleExtremes
+        if (!c || c.isDisposed() || !e) return
+        // 僅更新兩個資料點，不重新計算 MA/KD 或重建圖表。
+        c.setOption(
+          {
+            series: [
+              {
+                id: 'range-high',
+                type: 'scatter',
+                xAxisIndex: 0,
+                yAxisIndex: 0,
+                data: [[e.highDate, e.high]],
+              },
+              {
+                id: 'range-low',
+                type: 'scatter',
+                xAxisIndex: 0,
+                yAxisIndex: 0,
+                data: [[e.lowDate, e.low]],
+              },
+            ],
+          },
+          { lazyUpdate: true },
+        )
+      },
+      setZoom(start, end) {
+        const a = clamp(start, 0, 100),
+          b = clamp(end, a, 100)
+        this.zoomStart = a
+        this.zoomEnd = b
+        if (this.chart && !this.chart.isDisposed())
+          this.chart.dispatchAction({
+            type: 'dataZoom',
+            dataZoomId: 'zoom-inside',
+            start: a,
+            end: b,
+          })
+        this.queueExtremeUpdate()
+      },
+      showRecent(n) {
+        const size = this.candleRows.length
+        if (size) this.setZoom(Math.max(0, ((size - Math.min(size, n)) / size) * 100), 100)
       },
       renderChart() {
-        const chart = this.priceChart
-        if (!chart) return
-        const rows = this.candleRows
+        const c = this.chart,
+          rows = this.candleRows
+        if (!c || c.isDisposed()) return
         if (!rows.length) {
-          chart.clear()
-          this.lastExtremeKey = ''
+          c.clear()
           return
         }
         const dates = rows.map((r) => r.date)
         const candles = rows.map((r) => [r.open, r.close, r.low, r.high])
         const volumes = rows.map((r) => ({
           value: r.volume,
-          itemStyle: { color: r.close >= r.open ? '#ef5350' : '#26a69a' },
+          itemStyle: { color: r.close >= r.open ? '#ee565a' : '#1cb29b' },
         }))
-        const ma = (field) =>
-          rows.map((r) => (r[field] == null || r[field] === 0 ? null : r[field]))
         const kd = this.kdRows
-        // 同一股票、同一週期重新整理時保留滑桿位置；切換股票或週期才重設。
         const context = `${this.selectedStockCode}:${this.selectedView}`
         if (this.zoomContext !== context) {
-          this.zoomStart = Math.max(0, 100 * (1 - Math.min(rows.length, 90) / rows.length))
-          this.zoomEnd = 100
           this.zoomContext = context
+          this.zoomStart = Math.max(
+            0,
+            ((rows.length - Math.min(rows.length, 90)) / rows.length) * 100,
+          )
+          this.zoomEnd = 100
         }
-        const zoomStart = this.zoomStart
-        const zoomEnd = this.zoomEnd
-        this.lastExtremeKey = ''
+        const zoomStart = this.zoomStart,
+          zoomEnd = this.zoomEnd
         const extremes = this.visibleExtremes
-        const text = '#9daeba'
-        const gridLine = 'rgba(161,181,196,.11)'
-        chart.setOption(
+        const axisColor = '#9cabb9',
+          gridColor = 'rgba(155,176,193,.10)'
+        // MA 在沒有 API 均線值時，使用可得收盤價計算；資料不足則保留空值。
+        const maValues = (n) =>
+          rows.map((r, i) => {
+            const apiValue = r[`ma${n}`]
+            if (apiValue !== null && apiValue !== 0) return apiValue
+            if (i + 1 < n) return null
+            let total = 0
+            for (let j = i - n + 1; j <= i; j++) total += rows[j].close
+            return total / n
+          })
+        const line = (name, n) => ({
+          id: `ma-${n}`,
+          name,
+          type: 'line',
+          xAxisIndex: 0,
+          yAxisIndex: 0,
+          data: maValues(n),
+          smooth: false,
+          showSymbol: false,
+          connectNulls: false,
+          lineStyle: { color: MA_COLORS[n], width: 1.45 },
+          itemStyle: { color: MA_COLORS[n] },
+          emphasis: { disabled: true },
+          animation: false,
+        })
+        const labelMarker = (d, order) => ({
+          id: `deduct-${d.period}`,
+          name: `MA${d.period}扣抵`,
+          type: 'scatter',
+          xAxisIndex: 0,
+          yAxisIndex: 0,
+          silent: true,
+          z: 18,
+          animation: false,
+          symbol: 'diamond',
+          symbolSize: 9,
+          itemStyle: { color: d.color, borderColor: '#1b2631', borderWidth: 1 },
+          data: d.value == null ? [] : [[d.date, d.value]],
+          label: {
+            show: d.value != null,
+            position: order % 2 ? 'bottom' : 'top',
+            distance: 9,
+            formatter: () => `MA${d.period}扣 ${format(d.value)}`,
+            color: d.color,
+            fontSize: 10,
+            padding: [3, 5],
+            borderRadius: 4,
+            backgroundColor: 'rgba(19,29,40,.94)',
+          },
+          emphasis: { disabled: true },
+        })
+        const extremeMarker = (id, name, position, color, price, date) => ({
+          id,
+          name,
+          type: 'scatter',
+          xAxisIndex: 0,
+          yAxisIndex: 0,
+          silent: true,
+          z: 25,
+          symbol: 'circle',
+          symbolSize: 7,
+          animation: false,
+          itemStyle: { color, borderColor: '#1c252e', borderWidth: 1 },
+          data: date ? [[date, price]] : [],
+          label: {
+            show: true,
+            position,
+            distance: 8,
+            formatter: () => `${name} ${format(price)}`,
+            color,
+            fontSize: 11,
+            fontWeight: 'bold',
+            backgroundColor: '#17232d',
+            borderRadius: 4,
+            padding: [4, 6],
+          },
+          emphasis: { disabled: true },
+        })
+        c.setOption(
           {
             backgroundColor: 'transparent',
             animation: false,
-            color: ['#ef5350', '#6ba4ff', '#92cb73', '#ffc460', '#c19af4'],
-            tooltip: {
-              trigger: 'axis',
-              axisPointer: { type: 'cross', crossStyle: { color: '#7b8e9d' } },
-              backgroundColor: '#111b24',
-              borderColor: '#3e5363',
-              textStyle: { color: '#e8eef4' },
-              formatter(params) {
-                const p = params?.find((item) => item.seriesType === 'candlestick')
-                const i = p?.dataIndex ?? params?.[0]?.dataIndex
-                const r = rows[i]
-                if (!r) return ''
-                const fmt = (v) =>
-                  v == null ? '—' : Number(v).toLocaleString('zh-TW', { maximumFractionDigits: 2 })
-                return `<b>${r.date}</b><br/>開 ${fmt(r.open)}　高 ${fmt(r.high)}<br/>低 ${fmt(r.low)}　收 ${fmt(r.close)}<br/>量 ${fmt(r.volume)}`
-              },
-            },
+            color: [MA_COLORS[5], MA_COLORS[10], MA_COLORS[20], MA_COLORS[60]],
             legend: {
-              top: 9,
+              top: 6,
               left: 'center',
-              textStyle: { color: text },
+              textStyle: { color: axisColor },
               data: ['K 線', 'MA5', 'MA10', 'MA20', 'MA60', 'K(9)', 'D(3)'],
             },
-            axisPointer: { link: [{ xAxisIndex: 'all' }], label: { backgroundColor: '#34485b' } },
+            tooltip: {
+              trigger: 'axis',
+              axisPointer: { type: 'cross' },
+              confine: true,
+              backgroundColor: '#111a23',
+              borderColor: '#3f586a',
+              textStyle: { color: '#e8f1f7' },
+              formatter: (params) => {
+                const i =
+                  params?.find((p) => p.seriesType === 'candlestick')?.dataIndex ??
+                  params?.[0]?.dataIndex
+                const r = rows[i]
+                if (!r) return ''
+                return `<b>${r.date}</b><br/>開 ${format(r.open)}　高 ${format(r.high)}<br/>低 ${format(r.low)}　收 ${format(r.close)}<br/>量 ${this.volumeFmt(r.volume)}`
+              },
+            },
+            axisPointer: { link: [{ xAxisIndex: 'all' }], label: { backgroundColor: '#34495b' } },
             grid: [
-              { left: 68, right: 45, top: 56, height: '47%' },
-              { left: 68, right: 45, top: '62%', height: '10%' },
-              { left: 68, right: 45, top: '77%', height: '11%' },
+              { left: 54, right: 60, top: 52, height: '49%' },
+              { left: 54, right: 60, top: '63%', height: '10%' },
+              { left: 54, right: 60, top: '78%', height: '12%' },
             ],
             xAxis: [
               {
                 type: 'category',
                 data: dates,
                 boundaryGap: true,
-                axisLine: { lineStyle: { color: '#526372' } },
                 axisLabel: { show: false },
                 axisTick: { show: false },
+                axisLine: { lineStyle: { color: '#526575' } },
                 splitLine: { show: false },
               },
               {
@@ -527,9 +611,9 @@
                 gridIndex: 1,
                 data: dates,
                 boundaryGap: true,
-                axisLine: { lineStyle: { color: '#526372' } },
                 axisLabel: { show: false },
                 axisTick: { show: false },
+                axisLine: { lineStyle: { color: '#526575' } },
                 splitLine: { show: false },
               },
               {
@@ -537,31 +621,30 @@
                 gridIndex: 2,
                 data: dates,
                 boundaryGap: true,
-                axisLine: { lineStyle: { color: '#526372' } },
-                axisLabel: { color: text, hideOverlap: true },
+                axisLabel: { color: axisColor, hideOverlap: true },
                 axisTick: { show: false },
+                axisLine: { lineStyle: { color: '#526575' } },
                 splitLine: { show: false },
               },
             ],
             yAxis: [
               {
                 type: 'value',
-                scale: true,
                 position: 'right',
+                scale: true,
                 splitNumber: 5,
-                axisLabel: { color: text, formatter: (v) => Number(v).toFixed(1) },
+                axisLabel: { color: axisColor },
+                splitLine: { lineStyle: { color: gridColor } },
                 axisLine: { show: false },
-                splitLine: { lineStyle: { color: gridLine } },
-                splitArea: { show: false },
               },
               {
                 type: 'value',
                 gridIndex: 1,
-                scale: true,
                 position: 'right',
+                scale: true,
                 splitNumber: 2,
                 axisLabel: {
-                  color: text,
+                  color: axisColor,
                   formatter: (v) =>
                     v >= 1000000
                       ? `${(v / 1000000).toFixed(1)}M`
@@ -575,13 +658,13 @@
               {
                 type: 'value',
                 gridIndex: 2,
+                position: 'right',
                 min: 0,
                 max: 100,
                 interval: 50,
-                position: 'right',
-                axisLabel: { color: text },
+                axisLabel: { color: axisColor },
+                splitLine: { lineStyle: { color: gridColor } },
                 axisLine: { show: false },
-                splitLine: { lineStyle: { color: gridLine } },
               },
             ],
             dataZoom: [
@@ -592,135 +675,90 @@
                 start: zoomStart,
                 end: zoomEnd,
                 filterMode: 'none',
-                zoomOnMouseWheel: 'ctrl',
+                zoomOnMouseWheel: false,
                 moveOnMouseWheel: false,
                 moveOnMouseMove: true,
-                throttle: 50,
+                preventDefaultMouseMove: true,
+                throttle: 60,
               },
             ],
             series: [
               {
+                id: 'candles',
                 name: 'K 線',
                 type: 'candlestick',
                 xAxisIndex: 0,
                 yAxisIndex: 0,
                 data: candles,
+                animation: false,
                 itemStyle: {
-                  color: '#ef5350',
-                  color0: '#26a69a',
-                  borderColor: '#ef5350',
-                  borderColor0: '#26a69a',
+                  color: '#ee565a',
+                  color0: '#1cb29b',
+                  borderColor: '#ee565a',
+                  borderColor0: '#1cb29b',
                 },
               },
-              ...[
-                ['MA5', 'ma5'],
-                ['MA10', 'ma10'],
-                ['MA20', 'ma20'],
-                ['MA60', 'ma60'],
-              ].map(([name, key]) => ({
-                name,
-                type: 'line',
-                xAxisIndex: 0,
-                yAxisIndex: 0,
-                data: ma(key),
-                smooth: false,
-                showSymbol: false,
-                connectNulls: false,
-                lineStyle: { width: 1.4 },
-              })),
+              line('MA5', 5),
+              line('MA10', 10),
+              line('MA20', 20),
+              line('MA60', 60),
               {
+                id: 'volume',
                 name: '成交量',
                 type: 'bar',
                 xAxisIndex: 1,
                 yAxisIndex: 1,
                 data: volumes,
                 barMaxWidth: 12,
-                silent: false,
+                animation: false,
               },
               {
+                id: 'kd-k',
                 name: 'K(9)',
                 type: 'line',
                 xAxisIndex: 2,
                 yAxisIndex: 2,
-                data: kd.map((x) => x.k),
+                data: kd.map((v) => v.k),
                 showSymbol: false,
-                lineStyle: { width: 1.5, color: '#5aa9ff' },
-                itemStyle: { color: '#5aa9ff' },
+                animation: false,
+                lineStyle: { width: 1.5, color: '#60b2ff' },
+                itemStyle: { color: '#60b2ff' },
               },
               {
+                id: 'kd-d',
                 name: 'D(3)',
                 type: 'line',
                 xAxisIndex: 2,
                 yAxisIndex: 2,
-                data: kd.map((x) => x.d),
+                data: kd.map((v) => v.d),
                 showSymbol: false,
-                lineStyle: { width: 1.5, color: '#ffc460' },
-                itemStyle: { color: '#ffc460' },
+                animation: false,
+                lineStyle: { width: 1.5, color: '#ffc15d' },
+                itemStyle: { color: '#ffc15d' },
               },
-              // 區間最高與最低直接用價格 grid 的 scatter 定位（不是 markPoint）。
-              {
-                id: 'visible-high',
-                name: '區間最高',
-                type: 'scatter',
-                xAxisIndex: 0,
-                yAxisIndex: 0,
-                silent: true,
-                z: 30,
-                symbol: 'circle',
-                symbolSize: 8,
-                itemStyle: { color: '#ff7e85', borderColor: '#14202a', borderWidth: 1 },
-                data: extremes ? [[extremes.highDate, extremes.high]] : [],
-                label: {
-                  show: true,
-                  position: 'top',
-                  distance: 10,
-                  formatter: (params) => `最高 ${Number(params.value[1]).toLocaleString('zh-TW')}`,
-                  color: '#ffb5b9',
-                  fontSize: 12,
-                  fontWeight: 'bold',
-                  backgroundColor: '#14202a',
-                  borderColor: '#92515a',
-                  borderWidth: 1,
-                  borderRadius: 5,
-                  padding: [5, 7],
-                },
-                emphasis: { disabled: true },
-              },
-              {
-                id: 'visible-low',
-                name: '區間最低',
-                type: 'scatter',
-                xAxisIndex: 0,
-                yAxisIndex: 0,
-                silent: true,
-                z: 30,
-                symbol: 'circle',
-                symbolSize: 8,
-                itemStyle: { color: '#55d9ab', borderColor: '#14202a', borderWidth: 1 },
-                data: extremes ? [[extremes.lowDate, extremes.low]] : [],
-                label: {
-                  show: true,
-                  position: 'bottom',
-                  distance: 10,
-                  formatter: (params) => `最低 ${Number(params.value[1]).toLocaleString('zh-TW')}`,
-                  color: '#8ce9c5',
-                  fontSize: 12,
-                  fontWeight: 'bold',
-                  backgroundColor: '#14202a',
-                  borderColor: '#377662',
-                  borderWidth: 1,
-                  borderRadius: 5,
-                  padding: [5, 7],
-                },
-                emphasis: { disabled: true },
-              },
+              extremeMarker(
+                'range-high',
+                '最高',
+                'top',
+                '#ff9c9c',
+                extremes?.high,
+                extremes?.highDate,
+              ),
+              extremeMarker(
+                'range-low',
+                '最低',
+                'bottom',
+                '#65e1b2',
+                extremes?.low,
+                extremes?.lowDate,
+              ),
+              ...this.latestDeductions.map(labelMarker),
             ],
           },
           { notMerge: true, lazyUpdate: false },
         )
-        this.$nextTick(() => {
-          chart.resize()
-        })
+        // 僅在資料集或週期改變時做一次完整 setOption；滑鼠移動與縮放不重建圖表。
+        c.resize()
       },
     },
   }
@@ -728,21 +766,19 @@
 
 <style scoped>
   .kline-card {
-    width: 100%;
-    min-width: 0;
-    padding: 16px;
-    box-sizing: border-box;
     background: #1c252e;
     border: 1px solid #34424e;
     border-radius: 14px;
+    padding: 16px;
     color: #e6eef5;
+    min-width: 0;
   }
   .kline-head {
     display: flex;
-    justify-content: space-between;
-    align-items: center;
-    gap: 16px;
     flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
   }
   .kline-head h2 {
     font-size: 18px;
@@ -757,175 +793,144 @@
     display: flex;
     gap: 6px;
   }
-  .period-tabs button {
-    background: #293844;
-    color: #bed0de;
-    border: 1px solid #405261;
-    border-radius: 7px;
+  .period-tabs button,
+  .zoom-toolbar button {
     cursor: pointer;
-    padding: 8px 14px;
+    color: #d7e8f3;
+    background: #293844;
+    border: 1px solid #405b6d;
+    border-radius: 7px;
+    padding: 8px 13px;
   }
   .period-tabs button.active {
-    background: #205a46;
-    color: #9bf0c9;
-    border-color: #347e60;
+    color: #a3f4cb;
+    background: #205b46;
+    border-color: #328161;
   }
-  .quote-strip {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 10px 22px;
-    margin: 15px 0 5px;
-    font-size: 12px;
-    color: #8ea5b5;
-  }
-  .quote-strip b {
-    color: #e7eff6;
-    margin-left: 6px;
-  }
-  .quote-strip .quote-focus {
-    font-weight: 700;
-    color: #9cf1cb;
-  }
-  .quote-strip .high-price {
-    color: #ff7c80;
-  }
-  .quote-strip .low-price {
-    color: #58d5ad;
-  }
+  .quote-strip,
   .range-strip {
     display: flex;
     flex-wrap: wrap;
     align-items: center;
-    gap: 9px 24px;
-    padding: 10px 12px;
-    margin: 10px 0;
-    border: 1px solid #354652;
-    background: #15212b;
-    border-radius: 8px;
+    gap: 10px 22px;
+    margin: 14px 0 6px;
+    color: #9ab0c2;
     font-size: 12px;
-    color: #94a9bc;
   }
+  .quote-strip b,
   .range-strip b {
-    margin-left: 5px;
-    color: #e9f2f8;
-  }
-  .range-strip small {
-    color: #8298aa;
+    color: #ecf4fa;
     margin-left: 4px;
   }
-  .range-strip .high-price {
-    color: #f16b70;
+  .quote-strip .focus {
+    color: #94e8c0;
   }
-  .range-strip .low-price {
-    color: #4ad0a8;
+  .quote-strip .high,
+  .range-strip .high {
+    color: #ff9095;
+  }
+  .quote-strip .low,
+  .range-strip .low {
+    color: #5be0b2;
+  }
+  .range-strip {
+    padding: 10px 12px;
+    background: #15212b;
+    border: 1px solid #344958;
+    border-radius: 8px;
+  }
+  .range-strip small {
+    color: #849aaa;
+    margin-left: 4px;
+  }
+  .deduction-strip {
+    margin: 12px 0;
+    padding: 12px;
+    border: 1px solid #344958;
+    background: #15212b;
+    border-radius: 9px;
+  }
+  .deduction-heading {
+    display: flex;
+    gap: 12px;
+    flex-wrap: wrap;
+    align-items: baseline;
+    margin-bottom: 10px;
+  }
+  .deduction-heading strong {
+    font-size: 13px;
+    color: #e9f3fa;
+  }
+  .deduction-heading small {
+    color: #93a9bc;
+    font-size: 11px;
+  }
+  .deduction-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 9px;
+  }
+  .deduction-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    padding: 7px 9px;
+    border: 1px solid #405365;
+    border-left: 3px solid var(--ma-color);
+    border-radius: 6px;
+    background: #1d2d3a;
+    font-size: 12px;
+  }
+  .deduction-chip b {
+    color: var(--ma-color);
+  }
+  .deduction-chip small {
+    color: #93aabc;
   }
   .zoom-toolbar {
     display: flex;
     flex-wrap: wrap;
     align-items: center;
     gap: 8px;
-    margin: 8px 0 4px;
-    color: #9ab0c0;
+    margin: 9px 0;
     font-size: 12px;
-  }
-  .zoom-toolbar button {
-    padding: 6px 10px;
-    border: 1px solid #426071;
-    border-radius: 6px;
-    background: #253745;
-    color: #d9eaf5;
-    cursor: pointer;
-  }
-  .zoom-toolbar button:hover {
-    background: #335369;
+    color: #9db2c1;
   }
   .zoom-toolbar small {
-    color: #849cac;
+    color: #859daa;
   }
-  .chart-shell {
-    position: relative;
-    width: 100%;
-    min-width: 0;
+  .zoom-actions {
+    display: flex;
+    align-items: center;
+    gap: 5px;
   }
+  .zoom-action {
+    font-weight: 700;
+  }
+
   .chart-container {
-    height: 660px;
     width: 100%;
-    min-width: 0;
+    height: 640px;
+    cursor: grab;
+    user-select: none;
   }
-  .chart-container.hidden {
+  .chart-container:active {
+    cursor: grabbing;
+  }
+  .chart-container.empty {
     height: 0;
-    overflow: hidden;
   }
   .no-data {
-    padding: 32px 12px;
-    color: #a1b2c0;
     text-align: center;
+    color: #a1b2c0;
+    padding: 32px 0;
   }
-  @media (max-width: 700px) {
+  @media (max-width: 720px) {
     .kline-card {
       padding: 10px;
     }
     .chart-container {
-      height: 540px;
-    }
-  }
-  .native-zoom {
-    padding: 3px 64px 8px;
-    user-select: none;
-    touch-action: none;
-  }
-  .zoom-label {
-    display: block;
-    font-size: 11px;
-    color: #91aabb;
-    margin-bottom: 9px;
-  }
-  .zoom-track {
-    position: relative;
-    height: 23px;
-    background: #101922;
-    border: 1px solid #3c5465;
-    border-radius: 6px;
-    cursor: pointer;
-    touch-action: none;
-  }
-  .zoom-selection {
-    position: absolute;
-    top: 1px;
-    bottom: 1px;
-    background: rgba(100, 179, 204, 0.27);
-    border: 1px solid #528ba3;
-    box-sizing: border-box;
-    cursor: grab;
-    touch-action: none;
-  }
-  .zoom-selection:active {
-    cursor: grabbing;
-  }
-  .zoom-handle {
-    position: absolute;
-    top: -4px;
-    transform: translateX(-50%);
-    height: 30px;
-    width: 12px;
-    border-radius: 4px;
-    border: 1px solid #bee5ee;
-    background: #79b5cd;
-    cursor: ew-resize;
-    touch-action: none;
-    z-index: 3;
-    padding: 0;
-  }
-  .zoom-dates {
-    display: flex;
-    justify-content: space-between;
-    color: #829aab;
-    font-size: 11px;
-    margin-top: 6px;
-  }
-  @media (max-width: 700px) {
-    .native-zoom {
-      padding: 3px 16px 8px;
+      height: 530px;
     }
   }
 </style>
