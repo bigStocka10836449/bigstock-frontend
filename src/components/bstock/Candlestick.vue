@@ -3,7 +3,7 @@
     <header class="kline-head">
       <div>
         <h2>{{ selectedStockCode }} 股價走勢</h2>
-        <p>價格 · 均線 · 成交量 · KD（按住圖表左右拖曳時間範圍）</p>
+        <p>價格 · 均線 · 成交量 · MA 扣抵 · KD（按住圖表左右拖曳時間範圍）</p>
       </div>
       <div class="period-tabs" aria-label="K 線週期">
         <button
@@ -59,25 +59,6 @@
       >
     </div>
 
-    <div v-if="candleRows.length" class="deduction-strip" aria-label="均線扣抵價">
-      <div class="deduction-heading">
-        <strong>MA 扣抵價</strong>
-        <small>下一根 K 棒將從均線計算中移出的收盤價（可在圖中找到同色標記）</small>
-      </div>
-      <div class="deduction-list">
-        <div
-          v-for="d in latestDeductions"
-          :key="d.period"
-          class="deduction-chip"
-          :style="{ '--ma-color': d.color }"
-        >
-          <b>MA{{ d.period }}</b>
-          <span>{{ d.value === null ? '資料不足' : fmt(d.value) }}</span>
-          <small>{{ d.date || '—' }}</small>
-        </div>
-      </div>
-    </div>
-
     <div v-if="candleRows.length" class="zoom-toolbar">
       <span>顯示範圍</span>
       <div class="zoom-actions" aria-label="以目前視窗中心縮放">
@@ -102,16 +83,78 @@
         最近 {{ n }} 根
       </button>
       <button type="button" @click="setZoom(0, 100)">全部</button>
-      <small>以視窗中央縮放；按住圖表左右拖曳平移；滾輪維持頁面捲動</small>
+      <small>先縮放至非全部範圍，再按住價格／成交量／KD 圖拖曳平移；滾輪正常捲動頁面</small>
     </div>
 
     <div v-if="!candleRows.length" class="no-data">此週期目前沒有有效 K 線資料。</div>
-    <div ref="priceChart" class="chart-container" :class="{ empty: !candleRows.length }"></div>
+    <div class="chart-host">
+      <div ref="priceChart" class="chart-container" :class="{ empty: !candleRows.length }"></div>
+      <!-- SVG 與 ECharts 疊合但不接受滑鼠事件；四色虛線對準扣抵 K 棒及下方三角形 -->
+      <svg
+        v-if="candleRows.length"
+        class="ma-guide-layer"
+        :viewBox="`0 0 ${chartSize.width} ${chartSize.height}`"
+        :width="chartSize.width"
+        :height="chartSize.height"
+        aria-hidden="true"
+      >
+        <g v-for="marker in deductionMarkers" :key="`guide-${marker.period}`">
+          <line
+            :x1="marker.x"
+            :x2="marker.x"
+            :y1="marker.y"
+            :y2="marker.trackY"
+            :stroke="marker.color"
+            stroke-width="1"
+            stroke-dasharray="4 5"
+            opacity="0.68"
+          />
+          <circle :cx="marker.x" :cy="marker.y" r="2.6" :fill="marker.color" />
+        </g>
+      </svg>
+      <!-- 扣抵三角形放在成交量下方，按日期與上方 K 棒虛線連動 -->
+      <div
+        v-if="candleRows.length"
+        ref="maTracks"
+        class="ma-deduction-tracks"
+        aria-label="均線扣抵位置"
+      >
+        <div
+          v-for="period in enabledMaPeriods"
+          :key="period"
+          class="ma-track-row"
+          :style="{ '--ma-color': maColor(period), height: `${100 / enabledMaPeriods.length}%` }"
+        >
+          <span class="ma-track-title">MA{{ period }}</span>
+          <template
+            v-for="marker in deductionMarkers.filter((m) => m.period === period)"
+            :key="marker.period"
+          >
+            <div
+              class="ma-track-point"
+              :style="{ left: `${marker.x}px` }"
+              :title="`MA${period} 扣抵：${marker.date} 收盤 ${fmt(marker.value)}`"
+            >
+              <span class="ma-track-triangle"></span>
+              <span class="ma-track-tag">{{ fmt(marker.value) }}</span>
+            </div>
+          </template>
+          <span v-if="!deductionMarkers.some((m) => m.period === period)" class="ma-track-empty">
+            {{
+              latestDeductions.find((d) => d.period === period)?.value == null
+                ? '資料不足'
+                : '不在可見範圍'
+            }}
+          </span>
+        </div>
+      </div>
+    </div>
   </section>
 </template>
 
 <script>
   import * as echarts from 'echarts'
+  import { markRaw } from 'vue'
 
   const MA_PERIODS = [5, 10, 20, 60]
   const MA_COLORS = { 5: '#fa646b', 10: '#63a6ff', 20: '#96d17e', 60: '#ffc15d' }
@@ -178,9 +221,13 @@
         chart: null,
         observer: null,
         hoverIndex: null,
+        deductionMarkers: [],
+        chartSize: { width: 1, height: 1 },
         zoomStart: 0,
         zoomEnd: 100,
         zoomContext: '',
+        maVisibility: { 5: true, 10: true, 20: true, 60: true },
+        onLegendChanged: null,
         extremesTimer: null,
         resizeFrame: null,
         onZoom: null,
@@ -188,9 +235,17 @@
         onChartHover: null,
         onGlobalOut: null,
         onZrMove: null,
+        onDragDown: null,
+        onDragMove: null,
+        onDragUp: null,
+        onFinished: null,
+        markerFrame: null,
       }
     },
     computed: {
+      enabledMaPeriods() {
+        return MA_PERIODS.filter((n) => this.maVisibility[n])
+      },
       candleRows() {
         const key = {
           day: 'singleStockDayPriceVos',
@@ -277,11 +332,14 @@
         this.$nextTick(() => this.renderChart())
       },
       isKLineChart() {
-        this.$nextTick(() => this.chart?.resize())
+        this.$nextTick(() => {
+          this.chart?.resize()
+          this.scheduleDeductionMarkers()
+        })
       },
     },
     mounted() {
-      this.chart = echarts.init(this.$refs.priceChart, undefined, { renderer: 'canvas' })
+      this.chart = markRaw(echarts.init(this.$refs.priceChart, undefined, { renderer: 'canvas' }))
       this.onZoom = (event) => {
         const payload = event?.batch?.[0] ?? event
         let a = Number(payload?.start),
@@ -298,8 +356,9 @@
           return
         this.zoomStart = nextA
         this.zoomEnd = nextB
+        this.scheduleDeductionMarkers()
         // 不在 dataZoom 回呼中同步 setOption，避免 render-loop 與拖曳卡頓。
-        this.queueExtremeUpdate()
+        // 更新 Vue 可見區間摘要即可；不要在 dataZoom 事件中 setOption(series)。
       }
       this.onAxisPointer = (event) => {
         const axis =
@@ -345,21 +404,106 @@
           /* 圖表尚未建立座標軸時不更新 */
         }
       }
+      // 使用瀏覽器 Pointer Events 拖曳，避免 ZRender/ECharts 的滑鼠事件互相搶奪。
+      // pointer capture 可確保游標移出圖表後仍收到移動與放開事件。
+      this._dragState = null
+      this._dragFrame = null
+      this._dragTarget = null
+      this.onDragDown = (event) => {
+        if (event.button !== 0 || !this.chart || this.chart.isDisposed()) return
+        if (!this.candleRows.length) return
+        const bounds = this.$refs.priceChart.getBoundingClientRect()
+        const point = [event.clientX - bounds.left, event.clientY - bounds.top]
+        // 不限制只點中 K 棒；三個繪圖區域都可以按住拖曳。
+        if (![0, 1, 2].some((gridIndex) => this.chart.containPixel({ gridIndex }, point))) return
+        const width = this.zoomEnd - this.zoomStart
+        if (width >= 99.999) return // 先按「最近 30 / 60 / 90 根」或「＋放大」才能平移。
+        this._dragState = {
+          pointerId: event.pointerId,
+          startX: event.clientX,
+          start: this.zoomStart,
+          end: this.zoomEnd,
+        }
+        this.$refs.priceChart.setPointerCapture?.(event.pointerId)
+        this.$refs.priceChart.style.cursor = 'grabbing'
+        event.preventDefault()
+      }
+      this.onDragMove = (event) => {
+        const drag = this._dragState
+        if (!drag || event.pointerId !== drag.pointerId || !this.chart || this.chart.isDisposed())
+          return
+        const plotWidth = Math.max(1, this.chart.getWidth() - 114)
+        const width = drag.end - drag.start
+        const shift = (-(event.clientX - drag.startX) / plotWidth) * width
+        const nextStart = clamp(drag.start + shift, 0, 100 - width)
+        const nextEnd = nextStart + width
+        // 每一畫格最多派送一個 dataZoom，避免高頻事件塞滿 ECharts Scheduler。
+        this._pendingPan = [nextStart, nextEnd]
+        if (this._dragFrame !== null) return
+        this._dragFrame = requestAnimationFrame(() => {
+          this._dragFrame = null
+          const next = this._pendingPan
+          this._pendingPan = null
+          if (next && this.chart && !this.chart.isDisposed()) this.setZoom(next[0], next[1])
+        })
+        event.preventDefault()
+      }
+      this.onDragUp = (event) => {
+        if (
+          !this._dragState ||
+          (event?.pointerId !== undefined && event.pointerId !== this._dragState.pointerId)
+        )
+          return
+        // 放開時先套用最後一幀，避免最後位置被丟掉。
+        if (this._dragFrame !== null) cancelAnimationFrame(this._dragFrame)
+        this._dragFrame = null
+        const next = this._pendingPan
+        this._pendingPan = null
+        if (next && this.chart && !this.chart.isDisposed()) this.setZoom(next[0], next[1])
+        if (this.$refs.priceChart?.hasPointerCapture?.(this._dragState.pointerId)) {
+          this.$refs.priceChart.releasePointerCapture(this._dragState.pointerId)
+        }
+        this._dragState = null
+        if (this.$refs.priceChart) this.$refs.priceChart.style.cursor = 'grab'
+      }
       this.onGlobalOut = () => {
         this.hoverIndex = null
       }
+      this.onFinished = () => this.scheduleDeductionMarkers()
+      // Legend 是 MA 線與扣抵標記共用的唯一開關，沒有額外的顯示狀態。
+      this.onLegendChanged = (event) => {
+        const selected = event?.selected || {}
+        const next = { ...this.maVisibility }
+        for (const n of MA_PERIODS) {
+          if (Object.prototype.hasOwnProperty.call(selected, `MA${n}`)) {
+            next[n] = selected[`MA${n}`] !== false
+          }
+        }
+        this.maVisibility = next
+        // DOM 軌道的數量可能改變，等待 Vue 佈局更新後再定位。
+        this.$nextTick(() => this.scheduleDeductionMarkers())
+      }
+      this.chart.on('legendselectchanged', this.onLegendChanged)
+      this.chart.on('finished', this.onFinished)
       this.chart.on('datazoom', this.onZoom)
       this.chart.on('updateAxisPointer', this.onAxisPointer)
       this.chart.on('mouseover', this.onChartHover)
       this.chart.getZr().on('globalout', this.onGlobalOut)
       this.chart.getZr().on('mousemove', this.onZrMove)
+      this.$refs.priceChart.addEventListener('pointerdown', this.onDragDown, true)
+      this.$refs.priceChart.addEventListener('pointermove', this.onDragMove, true)
+      this.$refs.priceChart.addEventListener('pointerup', this.onDragUp, true)
+      this.$refs.priceChart.addEventListener('pointercancel', this.onDragUp, true)
       this.$nextTick(() => this.renderChart())
       if (typeof ResizeObserver !== 'undefined') {
         this.observer = new ResizeObserver(() => {
           if (this.resizeFrame != null) return
           this.resizeFrame = requestAnimationFrame(() => {
             this.resizeFrame = null
-            if (!this.chart?.isDisposed()) this.chart?.resize()
+            if (!this.chart?.isDisposed()) {
+              this.chart?.resize()
+              this.scheduleDeductionMarkers()
+            }
           })
         })
         this.observer.observe(this.$refs.priceChart)
@@ -369,7 +513,15 @@
       this.observer?.disconnect()
       if (this.extremesTimer !== null) clearTimeout(this.extremesTimer)
       if (this.resizeFrame !== null) cancelAnimationFrame(this.resizeFrame)
+      if (this._dragFrame != null) cancelAnimationFrame(this._dragFrame)
+      if (this.markerFrame != null) cancelAnimationFrame(this.markerFrame)
+      this.$refs.priceChart?.removeEventListener('pointerdown', this.onDragDown, true)
+      this.$refs.priceChart?.removeEventListener('pointermove', this.onDragMove, true)
+      this.$refs.priceChart?.removeEventListener('pointerup', this.onDragUp, true)
+      this.$refs.priceChart?.removeEventListener('pointercancel', this.onDragUp, true)
       if (this.chart) {
+        this.chart.off('legendselectchanged', this.onLegendChanged)
+        this.chart.off('finished', this.onFinished)
         this.chart.off('datazoom', this.onZoom)
         this.chart.off('updateAxisPointer', this.onAxisPointer)
         this.chart.off('mouseover', this.onChartHover)
@@ -380,12 +532,68 @@
       this.chart = null
     },
     methods: {
+      scheduleDeductionMarkers() {
+        if (this.markerFrame != null) return
+        this.markerFrame = requestAnimationFrame(() => {
+          this.markerFrame = null
+          this.updateDeductionMarkers()
+        })
+      },
+      updateDeductionMarkers() {
+        const chart = this.chart
+        if (!chart || chart.isDisposed() || !this.candleRows.length) {
+          this.deductionMarkers = []
+          return
+        }
+        // 只透過已存在的價格座標系計算日期的水平座標。
+        // 扣抵標籤將放在成交量下方的獨立軌道，絕不蓋住 K 棒。
+        const coord = chart.getModel()?.getSeriesByIndex(0)?.coordinateSystem
+        if (!coord || typeof coord.dataToPoint !== 'function') {
+          this.deductionMarkers = []
+          return
+        }
+        const [start, end] = visibleRange(this.candleRows.length, this.zoomStart, this.zoomEnd)
+        const chartWidth = chart.getWidth()
+        const chartHeight = chart.getHeight()
+        const trackNode = this.$refs.maTracks
+        const chartNode = this.$refs.priceChart
+        if (!trackNode || !chartNode) return
+        // 位置由真實 DOM 幾何取得，防止不同螢幕寬度下虛線與三角形錯位。
+        const trackBounds = trackNode.getBoundingClientRect()
+        const chartBounds = chartNode.getBoundingClientRect()
+        const trackTop = trackBounds.top - chartBounds.top
+        const activePeriods = this.enabledMaPeriods
+        const rowHeight = trackBounds.height / Math.max(1, activePeriods.length)
+        const markers = []
+        for (const item of this.latestDeductions) {
+          if (
+            !this.maVisibility[item.period] ||
+            item.value === null ||
+            item.index < start ||
+            item.index > end
+          )
+            continue
+          const point = coord.dataToPoint([item.index, item.value])
+          const x = Array.isArray(point) ? Number(point[0]) : NaN
+          const y = Array.isArray(point) ? Number(point[1]) : NaN
+          if (!Number.isFinite(x) || !Number.isFinite(y)) continue
+          if (x < 54 || x > chartWidth - 60) continue
+          const rowIndex = activePeriods.indexOf(item.period)
+          const trackY = trackTop + rowHeight * (rowIndex + 0.5)
+          markers.push({ ...item, x, y, trackY })
+        }
+        this.chartSize = { width: chartWidth, height: chartHeight }
+        this.deductionMarkers = markers
+      },
       changePeriod(period) {
         if (!this.periods.some((p) => p.id === period) || this.selectedView === period) return
         this.selectedView = period
       },
       fmt(v) {
         return format(v)
+      },
+      maColor(period) {
+        return MA_COLORS[period]
       },
       // 不必選中 K 棒：加減按鈕以當前可見區間中央為中心。
       zoomAroundCenter(direction) {
@@ -404,40 +612,6 @@
       volumeFmt(v) {
         return v == null ? '—' : Number(v).toLocaleString('zh-TW')
       },
-      queueExtremeUpdate() {
-        if (this.extremesTimer !== null) clearTimeout(this.extremesTimer)
-        this.extremesTimer = setTimeout(() => {
-          this.extremesTimer = null
-          this.updateExtremeMarkers()
-        }, 240)
-      },
-      updateExtremeMarkers() {
-        const c = this.chart,
-          e = this.visibleExtremes
-        if (!c || c.isDisposed() || !e) return
-        // 僅更新兩個資料點，不重新計算 MA/KD 或重建圖表。
-        c.setOption(
-          {
-            series: [
-              {
-                id: 'range-high',
-                type: 'scatter',
-                xAxisIndex: 0,
-                yAxisIndex: 0,
-                data: [[e.highDate, e.high]],
-              },
-              {
-                id: 'range-low',
-                type: 'scatter',
-                xAxisIndex: 0,
-                yAxisIndex: 0,
-                data: [[e.lowDate, e.low]],
-              },
-            ],
-          },
-          { lazyUpdate: true },
-        )
-      },
       setZoom(start, end) {
         const a = clamp(start, 0, 100),
           b = clamp(end, a, 100)
@@ -450,7 +624,7 @@
             start: a,
             end: b,
           })
-        this.queueExtremeUpdate()
+        // 更新 Vue 可見區間摘要即可；不要在 dataZoom 事件中 setOption(series)。
       },
       showRecent(n) {
         const size = this.candleRows.length
@@ -461,6 +635,7 @@
           rows = this.candleRows
         if (!c || c.isDisposed()) return
         if (!rows.length) {
+          this.deductionMarkers = []
           c.clear()
           return
         }
@@ -482,7 +657,6 @@
         }
         const zoomStart = this.zoomStart,
           zoomEnd = this.zoomEnd
-        const extremes = this.visibleExtremes
         const axisColor = '#9cabb9',
           gridColor = 'rgba(155,176,193,.10)'
         // MA 在沒有 API 均線值時，使用可得收盤價計算；資料不足則保留空值。
@@ -510,59 +684,9 @@
           emphasis: { disabled: true },
           animation: false,
         })
-        const labelMarker = (d, order) => ({
-          id: `deduct-${d.period}`,
-          name: `MA${d.period}扣抵`,
-          type: 'scatter',
-          xAxisIndex: 0,
-          yAxisIndex: 0,
-          silent: true,
-          z: 18,
-          animation: false,
-          symbol: 'diamond',
-          symbolSize: 9,
-          itemStyle: { color: d.color, borderColor: '#1b2631', borderWidth: 1 },
-          data: d.value == null ? [] : [[d.date, d.value]],
-          label: {
-            show: d.value != null,
-            position: order % 2 ? 'bottom' : 'top',
-            distance: 9,
-            formatter: () => `MA${d.period}扣 ${format(d.value)}`,
-            color: d.color,
-            fontSize: 10,
-            padding: [3, 5],
-            borderRadius: 4,
-            backgroundColor: 'rgba(19,29,40,.94)',
-          },
-          emphasis: { disabled: true },
-        })
-        const extremeMarker = (id, name, position, color, price, date) => ({
-          id,
-          name,
-          type: 'scatter',
-          xAxisIndex: 0,
-          yAxisIndex: 0,
-          silent: true,
-          z: 25,
-          symbol: 'circle',
-          symbolSize: 7,
-          animation: false,
-          itemStyle: { color, borderColor: '#1c252e', borderWidth: 1 },
-          data: date ? [[date, price]] : [],
-          label: {
-            show: true,
-            position,
-            distance: 8,
-            formatter: () => `${name} ${format(price)}`,
-            color,
-            fontSize: 11,
-            fontWeight: 'bold',
-            backgroundColor: '#17232d',
-            borderRadius: 4,
-            padding: [4, 6],
-          },
-          emphasis: { disabled: true },
-        })
+        // 暫停 scatter 形式的扣抵 / 極值標籤：在 dataZoom 當下更新這些
+        // series 會觸發部分 ECharts 版本的 dataSample / seriesTaskReset 例外。
+        // 扣抵與區間高低價仍完整顯示在上方資訊列。
         c.setOption(
           {
             backgroundColor: 'transparent',
@@ -572,6 +696,7 @@
               top: 6,
               left: 'center',
               textStyle: { color: axisColor },
+              selected: Object.fromEntries(MA_PERIODS.map((n) => [`MA${n}`, this.maVisibility[n]])),
               data: ['K 線', 'MA5', 'MA10', 'MA20', 'MA60', 'K(9)', 'D(3)'],
             },
             tooltip: {
@@ -592,9 +717,9 @@
             },
             axisPointer: { link: [{ xAxisIndex: 'all' }], label: { backgroundColor: '#34495b' } },
             grid: [
-              { left: 54, right: 60, top: 52, height: '49%' },
-              { left: 54, right: 60, top: '63%', height: '10%' },
-              { left: 54, right: 60, top: '78%', height: '12%' },
+              { left: 54, right: 60, top: 52, height: '45%' },
+              { left: 54, right: 60, top: '58%', height: '9%' },
+              { left: 54, right: 60, top: '85%', height: '11%' },
             ],
             xAxis: [
               {
@@ -677,8 +802,8 @@
                 filterMode: 'none',
                 zoomOnMouseWheel: false,
                 moveOnMouseWheel: false,
-                moveOnMouseMove: true,
-                preventDefaultMouseMove: true,
+                moveOnMouseMove: false,
+                preventDefaultMouseMove: false,
                 throttle: 60,
               },
             ],
@@ -736,29 +861,13 @@
                 lineStyle: { width: 1.5, color: '#ffc15d' },
                 itemStyle: { color: '#ffc15d' },
               },
-              extremeMarker(
-                'range-high',
-                '最高',
-                'top',
-                '#ff9c9c',
-                extremes?.high,
-                extremes?.highDate,
-              ),
-              extremeMarker(
-                'range-low',
-                '最低',
-                'bottom',
-                '#65e1b2',
-                extremes?.low,
-                extremes?.lowDate,
-              ),
-              ...this.latestDeductions.map(labelMarker),
             ],
           },
           { notMerge: true, lazyUpdate: false },
         )
         // 僅在資料集或週期改變時做一次完整 setOption；滑鼠移動與縮放不重建圖表。
         c.resize()
+        this.scheduleDeductionMarkers()
       },
     },
   }
@@ -843,50 +952,6 @@
     color: #849aaa;
     margin-left: 4px;
   }
-  .deduction-strip {
-    margin: 12px 0;
-    padding: 12px;
-    border: 1px solid #344958;
-    background: #15212b;
-    border-radius: 9px;
-  }
-  .deduction-heading {
-    display: flex;
-    gap: 12px;
-    flex-wrap: wrap;
-    align-items: baseline;
-    margin-bottom: 10px;
-  }
-  .deduction-heading strong {
-    font-size: 13px;
-    color: #e9f3fa;
-  }
-  .deduction-heading small {
-    color: #93a9bc;
-    font-size: 11px;
-  }
-  .deduction-list {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 9px;
-  }
-  .deduction-chip {
-    display: inline-flex;
-    align-items: center;
-    gap: 7px;
-    padding: 7px 9px;
-    border: 1px solid #405365;
-    border-left: 3px solid var(--ma-color);
-    border-radius: 6px;
-    background: #1d2d3a;
-    font-size: 12px;
-  }
-  .deduction-chip b {
-    color: var(--ma-color);
-  }
-  .deduction-chip small {
-    color: #93aabc;
-  }
   .zoom-toolbar {
     display: flex;
     flex-wrap: wrap;
@@ -908,11 +973,95 @@
     font-weight: 700;
   }
 
+  .chart-host {
+    position: relative;
+    width: 100%;
+    min-width: 0;
+  }
+  .ma-guide-layer {
+    position: absolute;
+    top: 0;
+    left: 0;
+    pointer-events: none;
+    z-index: 2;
+    overflow: visible;
+  }
+  /* 隨 MA 圖例狀態顯示扣抵軌道；置於成交量與 KD 之間 */
+  .ma-deduction-tracks {
+    position: absolute;
+    top: 69%;
+    height: 13%;
+    left: 0;
+    right: 0;
+    pointer-events: none;
+    overflow: hidden;
+    border-top: 1px solid rgba(143, 168, 188, 0.18);
+    border-bottom: 1px solid rgba(143, 168, 188, 0.18);
+    background: rgba(11, 22, 31, 0.28);
+  }
+  .ma-track-row {
+    position: relative;
+    border-bottom: 1px dashed rgba(143, 168, 188, 0.12);
+  }
+  .ma-track-row:last-child {
+    border-bottom: 0;
+  }
+  .ma-track-title {
+    position: absolute;
+    z-index: 2;
+    top: 50%;
+    left: 4px;
+    transform: translateY(-50%);
+    font-size: 10px;
+    font-weight: 700;
+    color: var(--ma-color);
+    background: rgba(18, 32, 44, 0.95);
+    padding: 1px 3px;
+  }
+  .ma-track-point {
+    position: absolute;
+    top: 50%;
+    transform: translate(-6px, -50%);
+    z-index: 1;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    color: var(--ma-color);
+    white-space: nowrap;
+  }
+  .ma-track-triangle {
+    width: 0;
+    height: 0;
+    border-left: 6px solid transparent;
+    border-right: 6px solid transparent;
+    border-bottom: 10px solid var(--ma-color);
+    filter: drop-shadow(0 0 2px rgba(0, 0, 0, 0.5));
+    flex: none;
+  }
+  .ma-track-tag {
+    color: var(--ma-color);
+    background: #14222e;
+    border: 1px solid var(--ma-color);
+    border-radius: 3px;
+    padding: 0 3px;
+    font-size: 10px;
+    line-height: 15px;
+    font-weight: 600;
+  }
+  .ma-track-empty {
+    position: absolute;
+    right: 65px;
+    top: 50%;
+    transform: translateY(-50%);
+    color: #7c8c9a;
+    font-size: 10px;
+  }
   .chart-container {
     width: 100%;
     height: 640px;
     cursor: grab;
     user-select: none;
+    touch-action: pan-y;
   }
   .chart-container:active {
     cursor: grabbing;
