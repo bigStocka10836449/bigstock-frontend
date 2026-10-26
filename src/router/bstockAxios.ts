@@ -57,9 +57,13 @@ const apiClient = axios.create({
 function isAuthBootstrapRequest(url?: string): boolean {
   if (!url) return false
 
-  return ['/auth/login', '/auth/tempToken', '/device/register', '/device/verify'].some((path) =>
-    url.includes(path),
-  )
+  return [
+    '/auth/login',
+    '/auth/tempToken',
+    '/device/register',
+    '/device/web/register', // 新增
+    '/device/verify',
+  ].some((path) => url.includes(path))
 }
 
 /**
@@ -86,6 +90,13 @@ function setAuthorization(config: InternalAxiosRequestConfig, token: string): vo
  */
 apiClient.interceptors.request.use(
   async (config: InternalAxiosRequestConfig): Promise<InternalAxiosRequestConfig> => {
+    console.log(
+      '[AXIOS] Request interceptor entered:',
+      config.method,
+      config.url,
+      'skipAuthRefresh:',
+      (config as any).skipAuthRefresh,
+    )
     if (isAuthBootstrapRequest(config.url)) {
       return config
     }
