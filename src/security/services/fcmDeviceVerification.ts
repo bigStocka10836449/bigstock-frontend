@@ -152,7 +152,7 @@ async function createChallengeWaiter(): Promise<ChallengeWaiter> {
   })
 
   // Handle early rejection without consuming it.
-  void promise.catch(() => {})
+  void promise.catch(() => { })
 
   function cleanup(): void {
     if (timeout !== undefined) {
@@ -193,13 +193,24 @@ async function createChallengeWaiter(): Promise<ChallengeWaiter> {
     const stopListener = await listenForForegroundMessages((payload) => {
       const data = payload?.data as DeviceVerifyMessage | undefined
 
+      console.log('[FCM DEBUG] Foreground message received', {
+        messageId: payload?.messageId,
+        type: data?.type,
+        hasChallengeId: Boolean(data?.challengeId),
+        visibilityState: document.visibilityState,
+      })
+
       if (data?.type !== 'DEVICE_VERIFY') {
+        console.warn('[FCM DEBUG] Unexpected message type:', data?.type)
         return
       }
 
       if (!data.challengeId) {
+        console.warn('[FCM DEBUG] DEVICE_VERIFY missing challengeId')
         return
       }
+
+      console.log('[FCM] DEVICE_VERIFY message received')
 
       complete(data.challengeId)
     })

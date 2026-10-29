@@ -284,7 +284,7 @@ async function createChallengeWaiter(): Promise<ChallengeWaiter> {
        */
       timeout = setTimeout(() => {
         fail(new Error('Timed out waiting for FCM device challenge.'))
-      }, 15000)
+      }, 30000)
     }
   } catch (error) {
     const normalizedError =
