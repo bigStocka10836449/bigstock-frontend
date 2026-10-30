@@ -92,6 +92,14 @@ const router = createRouter({
       name: 'news',
       component: () => import('@/views/NewsView.vue'),
     },
+    /**
+     * 漲跌幅排行
+     */
+    {
+      path: '/ranking',
+      name: 'stock-ranking',
+      component: () => import('@/views/StockRankingView.vue'),
+    },
   ],
 })
 

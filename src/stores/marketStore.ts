@@ -4,7 +4,12 @@ import { connectMarketWorker, type MarketWorkerHandle } from '@/services/marketW
 import type { SharedMarketStatus } from '@/services/marketWorkerProtocol'
 import { getUSMarketHistory } from '@/api/marketHistoryApi'
 import { parseAllMarketHistories, type MarketHistory } from '@/utils/marketHistoryParser'
-import { adaptMarketEvent, type LiveQuote } from '@/utils/marketEventAdapter'
+import {
+  adaptMarketEvent,
+  extractIntradayPoints,
+  type IntradayHistoryData,
+  type LiveQuote,
+} from '@/utils/marketEventAdapter'
 import type { MarketEvent } from '@/types/market'
 
 /** 六個市場維持既有商品代碼與顯示順序。 */
@@ -19,20 +24,37 @@ export const MARKETS = [
 export type MarketSymbol = (typeof MARKETS)[number]['symbol']
 export type MarketSocketStatus = SharedMarketStatus
 
-/** 即時圖的每個點都是 WebSocket 實際收到的有效價格，並非定時補造的資料。 */
+/** Yahoo 當日分鐘價格或 WebSocket 實際收到的變價點；不填造價格。 */
 export interface LivePricePoint {
-  /** 前端收到推播的時間（毫秒），用於圖表時間軸。 */
+  /** 行情來源時間（Unix 毫秒），備援才使用接收時間。 */
   time: number
   price: number
 }
 
-const MAX_LIVE_POINTS = 240
+/** 無分鐘歷史資料時，備援即時點數上限。 */
+const MAX_FALLBACK_POINTS = 240
+
+function marketTimeZone(symbol: string): string {
+  return symbol === 'WTX00' || symbol === 'WTX&'
+    ? 'Asia/Taipei'
+    : 'America/New_York'
+}
+
+function dateInZone(timestamp: number, timeZone: string): string {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(new Date(timestamp))
+  const part = (type: string) => parts.find(p => p.type === type)?.value ?? ''
+  return `${part('year')}-${part('month')}-${part('day')}`
+}
 
 export const useMarketStore = defineStore('market', () => {
   const histories = ref<Record<string, MarketHistory>>({})
   const live = ref<Record<string, LiveQuote>>({})
   const liveSeries = ref<Record<string, LivePricePoint[]>>({})
-  /** 記錄這個商品最後收到有效價格推播的時間（包含同價推播）。 */
   const liveReceivedAt = ref<Record<string, number>>({})
   const historyLoading = ref(false)
   const historyLoaded = ref(false)
@@ -49,27 +71,84 @@ export const useMarketStore = defineStore('market', () => {
   let socket: MarketWorkerHandle | null = null
   let socketGeneration = 0
 
-  /**
-   * 儲存 WebSocket 報價。價格沒變時更新最新報價，但不新增重複的走勢點。
-   * 因為上游可能定期重播 Redis 快取，不能把每次收到訊息都當成新交易。
-   * 注意：同價交易無法單憑價格辨識；若後端提供 tradeId/可靠成交時間，可改為以該欄位去重。
-   */
+  /** 一個商品目前已接受的交易時段；歷史優先使用上游 regular.start。 */
+  const sessionBySymbol = new Map<string, string>()
+  /** 只有同一個交易時段內才保留曾收到的分鐘歷史。 */
+  const timeZoneBySymbol = new Map<string, string>()
+  /** 避免行情來源偶爾缺歷史價格時，以接收時刻偽造當日分鐘線。 */
+  const hasHistoricalPoints = new Set<string>()
+
+  function sessionKey(history: IntradayHistoryData): string {
+    if (history.sessionStart !== null) return `session:${history.sessionStart}`
+    const last = history.points[history.points.length - 1]
+    return `day:${dateInZone(last.time, history.timeZone)}`
+  }
+
+  /** 將 Yahoo timestamp[i] + close[i] 合併為當日線；短回應不清掉既有歷史。 */
+  function mergeIntradayHistory(history: IntradayHistoryData): void {
+    if (history.points.length === 0) return
+
+    const symbol = history.symbol
+    const nextSession = sessionKey(history)
+    const oldSession = sessionBySymbol.get(symbol)
+
+    // timestamp 型的 session key 可比較；舊推播不應清除較新的交易時段。
+    if (oldSession?.startsWith('session:') && nextSession.startsWith('session:')) {
+      const oldStart = Number(oldSession.slice(8))
+      const nextStart = Number(nextSession.slice(8))
+      if (nextStart < oldStart) return
+    }
+
+    const sameSession = oldSession === nextSession
+    const existing = sameSession ? (liveSeries.value[symbol] ?? []) : []
+    const points = new Map<number, LivePricePoint>()
+    for (const point of existing) points.set(point.time, point)
+    for (const point of history.points) points.set(point.time, point)
+
+    liveSeries.value[symbol] = [...points.values()].sort((a, b) => a.time - b.time)
+    sessionBySymbol.set(symbol, nextSession)
+    timeZoneBySymbol.set(symbol, history.timeZone)
+    hasHistoricalPoints.add(symbol)
+  }
+
+  /** 保存最新報價；僅當 Yahoo 沒提供分鐘價格時以真實推播價格作為備援。 */
   function appendLiveQuote(quote: LiveQuote, receivedAt = Date.now()): void {
     if (quote.price === null || !Number.isFinite(quote.price) || quote.price <= 0) return
 
     live.value[quote.symbol] = quote
     liveReceivedAt.value[quote.symbol] = receivedAt
 
-    const existing = liveSeries.value[quote.symbol] ?? []
-    const last = existing[existing.length - 1]
-    // 不將未發生變動的快取價格畫成新走勢。
-    if (last?.price === quote.price) return
+    const time = typeof quote.updatedAt === 'number' && Number.isFinite(quote.updatedAt) && quote.updatedAt > 0
+      ? quote.updatedAt
+      : receivedAt
+    const zone = timeZoneBySymbol.get(quote.symbol) ?? marketTimeZone(quote.symbol)
+    const session = `day:${dateInZone(time, zone)}`
+    const oldSession = sessionBySymbol.get(quote.symbol)
+    if (oldSession && oldSession.startsWith('day:') && session < oldSession) return
 
-    const next: LivePricePoint = { time: receivedAt, price: quote.price }
-    liveSeries.value[quote.symbol] = [...existing, next].slice(-MAX_LIVE_POINTS)
+    // 跨日後必須退出上一交易日的歷史模式，才能在 Yahoo 缺 close[] 時記錄新報價。
+    if (hasHistoricalPoints.has(quote.symbol)) {
+      const existingHistory = liveSeries.value[quote.symbol] ?? []
+      const historyEnd = existingHistory[existingHistory.length - 1]?.time
+      if (historyEnd !== undefined && dateInZone(time, zone) > dateInZone(historyEnd, zone)) {
+        hasHistoricalPoints.delete(quote.symbol)
+      } else {
+        return
+      }
+    }
+
+    const existing = oldSession === session ? (liveSeries.value[quote.symbol] ?? []) : []
+    const last = existing[existing.length - 1]
+    if (last && (time <= last.time || last.price === quote.price)) return
+
+    liveSeries.value[quote.symbol] = [
+      ...existing,
+      { time, price: quote.price },
+    ].slice(-MAX_FALLBACK_POINTS)
+    sessionBySymbol.set(quote.symbol, session)
   }
 
-  /** 歷史資料只走 REST API；強制刷新失敗時保留已載入的舊 K 棒。 */
+  /** 歷史日 K 仍只走 REST API，不與 STOMP 當日線混用。 */
   async function loadHistories(force = false): Promise<void> {
     if (loadPromise) return loadPromise
     if (historyLoaded.value && !force) return
@@ -77,7 +156,6 @@ export const useMarketStore = defineStore('market', () => {
     historyError.value = ''
     const task = (async (): Promise<void> => {
       try {
-        // JWT 已由 bstockAxios Request Interceptor 統一處理。
         const response = await getUSMarketHistory()
         histories.value = parseAllMarketHistories(response.usHistory ?? {})
         historyLoaded.value = true
@@ -96,10 +174,7 @@ export const useMarketStore = defineStore('market', () => {
     }
   }
 
-  /**
-   * 由 App.vue 統一啟動；每個頁面只連上 SharedWorker 的 MessagePort。
-   * 同一瀏覽器同源分頁共用 Worker 內的一條 STOMP WebSocket。
-   */
+  /** App.vue 統一啟動；同源分頁共用 SharedWorker STOMP。 */
   function mountSocket(): void {
     if (socket) return
     socketStatus.value = 'connecting'
@@ -110,7 +185,13 @@ export const useMarketStore = defineStore('market', () => {
           if (generation !== socketGeneration) return
           try {
             const quote = adaptMarketEvent(event)
-            if (quote) appendLiveQuote(quote, event.receivedAt)
+            const intraday = extractIntradayPoints(event)
+
+            if (intraday) mergeIntradayHistory(intraday)
+            if (quote) {
+              // 報價更新仍維持 LiveQuote；有歷史序列時不額外插入假時間點。
+              appendLiveQuote(quote, event.receivedAt)
+            }
           } catch (error) {
             console.error('[Market] 即時行情解析失敗', error)
           }
@@ -125,7 +206,7 @@ export const useMarketStore = defineStore('market', () => {
     }
   }
 
-  /** 僅關閉本分頁 MessagePort；還有其他分頁時不會關閉共用 WebSocket。 */
+  /** 僅關閉本分頁 MessagePort。 */
   async function unmountSocket(): Promise<void> {
     if (!socket) return
     const current = socket
@@ -135,7 +216,6 @@ export const useMarketStore = defineStore('market', () => {
     socketStatus.value = 'disconnected'
   }
 
-  /** 明確遭後端取代（4001）時不會自動重連，僅供使用者手動要求。 */
   function retryMarketSocket(): void {
     socket?.retry()
   }

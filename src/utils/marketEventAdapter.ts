@@ -481,3 +481,75 @@ export function adaptMarketEvent(
     title: title ?? undefined,
   }
 }
+
+/** Yahoo Chart 分鐘資料中的有效價格點（時間為 Unix 毫秒）。 */
+export interface IntradayPricePoint {
+  time: number
+  price: number
+}
+
+export interface IntradayHistoryData {
+  symbol: string
+  /** 此份走勢對應的交易時段；優先採用 Yahoo regular.start。 */
+  sessionStart: number | null
+  timeZone: string
+  points: IntradayPricePoint[]
+}
+
+/** 從已解析的 MarketEvent 擷取 Yahoo 當日分鐘價格，不影響原本最新報價的解析。 */
+export function extractIntradayPoints(event: MarketEvent): IntradayHistoryData | null {
+  const symbol = TOPIC_SYMBOL_MAP[event.topic]
+  if (!symbol) return null
+
+  const raw = unwrapJson(event.rawMarketData)
+  const candidates = Array.isArray(raw) ? raw : [raw]
+
+  const matching = candidates.find(item =>
+    isRecord(item) && String(item.symbol ?? '') === symbol,
+  ) ?? candidates[0]
+  if (!isRecord(matching)) return null
+
+  const outerChart = unwrapJson(matching.chart)
+  if (!isRecord(outerChart)) return null
+
+  let chart: Record<string, unknown> = outerChart
+  if (Array.isArray(outerChart.result)) {
+    const first = unwrapJson(outerChart.result[0])
+    if (!isRecord(first)) return null
+    chart = first
+  }
+
+  const timestamps = chart.timestamp
+  const indicators = chart.indicators
+  if (!Array.isArray(timestamps) || !isRecord(indicators)) return null
+
+  const quotes = indicators.quote
+  const firstQuote = Array.isArray(quotes) ? quotes[0] : null
+  if (!isRecord(firstQuote) || !Array.isArray(firstQuote.close)) return null
+
+  const closes = firstQuote.close
+  const pointsByTime = new Map<number, IntradayPricePoint>()
+  for (let i = 0; i < Math.min(timestamps.length, closes.length); i++) {
+    const time = toTimestamp(timestamps[i])
+    const price = toNumber(closes[i])
+    if (time === null || price === null || price <= 0) continue
+    pointsByTime.set(time, { time, price })
+  }
+
+  if (pointsByTime.size === 0) return null
+
+  const meta = isRecord(chart.meta) ? chart.meta : null
+  const period = isRecord(meta?.currentTradingPeriod) ? meta.currentTradingPeriod : null
+  const regular = isRecord(period?.regular) ? period.regular : null
+  const sessionStart = toTimestamp(regular?.start)
+  const timeZone = typeof meta?.exchangeTimezoneName === 'string'
+    ? meta.exchangeTimezoneName
+    : (symbol.startsWith('WTX') ? 'Asia/Taipei' : 'America/New_York')
+
+  return {
+    symbol,
+    sessionStart,
+    timeZone,
+    points: [...pointsByTime.values()].sort((a, b) => a.time - b.time),
+  }
+}
