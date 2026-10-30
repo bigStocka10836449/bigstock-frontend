@@ -7,6 +7,7 @@
       <!-- 全站路由選單，手機可左右捲動。 -->
       <nav class="nav-menu" aria-label="網站主要導覽">
         <RouterLink to="/">首頁</RouterLink>
+        <RouterLink to="/ranking"> 漲跌幅排行 </RouterLink>
         <RouterLink to="/candlestick">個股查詢</RouterLink>
         <RouterLink to="/industries">產業分類</RouterLink>
         <RouterLink to="/calendar">財經行事曆</RouterLink>
@@ -25,6 +26,25 @@
 </script>
 
 <style scoped>
+  .ranking-nav-link {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 10px 18px;
+    border-radius: 6px;
+    background: #24313b;
+    border: 1px solid #40515c;
+    color: #e5edf4;
+    text-decoration: none;
+    font-size: 13px;
+  }
+
+  .ranking-nav-link:hover,
+  .ranking-nav-link.router-link-active {
+    background: #4caf50;
+    border-color: #4caf50;
+    color: #ffffff;
+  }
   .site-header {
     display: flex;
     flex-direction: column;

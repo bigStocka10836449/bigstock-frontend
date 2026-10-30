@@ -845,3 +845,47 @@ export function readShareholderStructure(
     },
   )
 }
+
+export interface StockQuarterFinancial {
+  stockId: string
+  stockName: string
+  market: string
+
+  year: number
+  quarter: number
+
+  periodStartMonth: number | null
+  periodEndMonth: number | null
+
+  unit: string | null
+
+  operatingRevenue: number | null
+  operatingProfit: number | null
+  nonOperatingIncomeExpense: number | null
+  netProfitAfterTax: number | null
+  capitalStockEndPeriod: number | null
+
+  earningsPerShare: number | null
+  netAssetValuePerShare: number | null
+
+  quickRatio: number | null
+  currentRatio: number | null
+  depn: number | null
+}
+
+/**
+ * 一次取得個股最近最多 13 季的財報。
+ *
+ * 12 季顯示 + 1 季計算依據。
+ */
+export async function readStockFinancialHistory(
+  market: ExchangeMarket,
+  stockId: string,
+): Promise<StockQuarterFinancial[]> {
+
+  const response = await apiClient.get<StockQuarterFinancial[]>(
+     `/api/financial/quarterly/stock/${encodeURIComponent(market)}/${encodeURIComponent(stockId)}`,
+  )
+
+  return response.data
+}
