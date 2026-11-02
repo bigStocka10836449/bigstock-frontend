@@ -1,7 +1,8 @@
+import { getRuntimeConfig } from '@/config/runtimeConfig'
 import axios from 'axios'
 
 const webApi = axios.create({
-  baseURL: import.meta.env.VITE_WEB_API_BASE_URL,
+  baseURL: getRuntimeConfig().WEB_API_BASE_URL,
   timeout: 15000,
   headers: {
     'Content-Type': 'application/json',

@@ -1,0 +1,62 @@
+server {
+    listen 80;
+    server_name _;
+
+    root /usr/share/nginx/html;
+    index index.html;
+
+    # Vue Router
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+
+    # Runtime Config
+    location = /config.js {
+        default_type application/javascript;
+        add_header Cache-Control "no-store" always;
+        try_files /config.js =404;
+    }
+
+    # Firebase Runtime Config
+    location = /runtime-config.json {
+        default_type application/json;
+        add_header Cache-Control "no-store" always;
+        try_files /runtime-config.json =404;
+    }
+
+    # Firebase Service Worker
+    location = /firebase-messaging-sw.js {
+        add_header Cache-Control "no-store" always;
+        add_header Service-Worker-Allowed "/" always;
+        try_files /firebase-messaging-sw.js =404;
+    }
+
+    # Spring Boot REST API
+    location /api/ {
+        proxy_pass ${BACKEND_INTERNAL_URL}/;
+
+        proxy_http_version 1.1;
+
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $http_x_forwarded_proto;
+    }
+
+    # WebSocket / SockJS
+    location /ws {
+        proxy_pass ${BACKEND_INTERNAL_URL};
+
+        proxy_http_version 1.1;
+
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $http_x_forwarded_proto;
+
+        proxy_read_timeout 3600s;
+        proxy_send_timeout 3600s;
+    }
+}

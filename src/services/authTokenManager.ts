@@ -1,4 +1,4 @@
-
+import { storageShield } from '@/utils/storageShield'
 import axios from 'axios'
 import { ensureFcmVerified } from '@/firebase/fcmStartup'
 
@@ -143,7 +143,7 @@ function normalizeExpiry(
  * 供 Axios Authorization Header 使用。
  */
 function getToken(): string | null {
-  const raw = localStorage.getItem('authToken')
+  const raw = storageShield.getAuthToken()
 
   if (!raw) return null
 
@@ -172,18 +172,12 @@ function setToken(
     normalizeExpiry(readJwtPayload(jwt)?.exp) ??
     normalizeExpiry(serverExp)
 
-  localStorage.setItem(
-    'authToken',
-    `Bearer ${jwt}`,
-  )
+  storageShield.setAuthToken(`Bearer ${jwt}`)
 
   if (exp !== null) {
-    localStorage.setItem(
-      'tokenExp',
-      String(exp),
-    )
+    storageShield.setTokenExp(exp)
   } else {
-    localStorage.removeItem('tokenExp')
+    storageShield.removeTokenExp()
   }
 
   tokenGeneration++
@@ -220,7 +214,7 @@ function getExpirationTime(
     normalizeToken(stored) === normalizeToken(target)
   ) {
     return normalizeExpiry(
-      localStorage.getItem('tokenExp'),
+      storageShield.getTokenExp<number>(),
     )
   }
 
@@ -367,7 +361,7 @@ async function refreshToken(): Promise<string> {
     if (
       exp === null ||
       exp <= Math.floor(Date.now() / 1000) +
-        REFRESH_BUFFER_SECONDS
+      REFRESH_BUFFER_SECONDS
     ) {
       throw new Error(
         '新核發的 Guest JWT 缺少有效期限或即將過期',
@@ -441,8 +435,8 @@ async function getValidToken(): Promise<string> {
 function clearToken(): void {
   tokenGeneration++
 
-  localStorage.removeItem('authToken')
-  localStorage.removeItem('tokenExp')
+  storageShield.removeAuthToken()
+  storageShield.removeTokenExp()
 }
 
 /**
@@ -465,7 +459,7 @@ async function recoverRejectedToken(
     rejectedToken &&
     current &&
     normalizeToken(current) !==
-      normalizeToken(rejectedToken) &&
+    normalizeToken(rejectedToken) &&
     !isExpiring(current)
   ) {
     return current

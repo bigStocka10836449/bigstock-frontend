@@ -1,3 +1,4 @@
+import { storageShield } from '@/utils/storageShield'
 import { authTokenManager } from '@/services/authTokenManager'
 import type { MarketEvent } from '@/types/market'
 import type {
@@ -25,7 +26,7 @@ export function connectMarketWorker(
   })
   const port = worker.port
   let closed = false
-  let authFingerprint = localStorage.getItem('authToken')
+  let authFingerprint = storageShield.getAuthTokenFingerprint()
 
   const send = (message: PageToWorker): void => {
     if (!closed) port.postMessage(message)
@@ -58,7 +59,7 @@ export function connectMarketWorker(
           }
         } finally {
           tokenRequests.delete(message.requestId)
-          authFingerprint = localStorage.getItem('authToken')
+          authFingerprint = storageShield.getAuthTokenFingerprint()
         }
       })()
     }
@@ -70,7 +71,7 @@ export function connectMarketWorker(
   const heartbeat = setInterval(() => send({ type: 'PING' }), 20_000)
 
   const onStorage = (event: StorageEvent): void => {
-    if (event.key === 'authToken' && event.newValue !== authFingerprint) {
+    if ((event.key === storageShield.authTokenStorageKey || event.key === null) && event.newValue !== authFingerprint) {
       authFingerprint = event.newValue
       send({ type: 'AUTH_CHANGED' })
     }
@@ -79,7 +80,7 @@ export function connectMarketWorker(
 
   // 同一分頁登入/登出時，storage event 不會觸發；以焦點事件補查。
   const onFocus = (): void => {
-    const current = localStorage.getItem('authToken')
+    const current = storageShield.getAuthTokenFingerprint()
     if (current !== authFingerprint) {
       authFingerprint = current
       send({ type: 'AUTH_CHANGED' })
