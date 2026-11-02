@@ -6,11 +6,9 @@ FROM node:22-alpine AS builder
 WORKDIR /app
 
 COPY package*.json ./
-
 RUN npm ci
 
 COPY . .
-
 RUN npm run build
 
 
@@ -21,12 +19,11 @@ FROM nginx:alpine
 
 RUN apk add --no-cache jq
 
-# Vue Build
+# Vue Production Build
 COPY --from=builder /app/dist/ /usr/share/nginx/html/
 
-# Nginx Template
-COPY nginx/default.conf.template \
-     /etc/nginx/templates/default.conf.template
+# Nginx Config
+COPY nginx.conf /etc/nginx/conf.d/default.conf
 
 # Runtime Config
 COPY docker/40-runtime-config.sh \
