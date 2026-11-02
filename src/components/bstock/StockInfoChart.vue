@@ -52,17 +52,8 @@
   import { computed, markRaw, nextTick, onBeforeUnmount, ref, watch } from 'vue'
   import * as echarts from 'echarts'
   import type { ECharts, EChartsOption } from 'echarts'
+  import type { MarginRecord } from '@/types/stockMargin'
 
-  interface MarginRecord {
-    tradingDay?: string | null
-    stockCode?: string | null
-    marginPurchase?: string | number | null
-    marginSales?: string | number | null
-    cashRedemption?: string | number | null
-    shortSale?: string | number | null
-    shortConvering?: string | number | null
-    stockRedemption?: string | number | null
-  }
   type NumericField =
     | 'marginPurchase'
     | 'marginSales'
