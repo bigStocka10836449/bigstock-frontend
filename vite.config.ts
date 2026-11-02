@@ -7,86 +7,69 @@ import { build as esbuild } from 'esbuild'
 
 import vue from '@vitejs/plugin-vue'
 import vueDevTools from 'vite-plugin-vue-devtools'
-
 import { chartObfuscationPlugin } from './build/chartObfuscationPlugin'
 
-// ============================================================
-// BigStock Production Terser Configuration
-// ============================================================
 
-// 直接使用 Vite 的 TerserOptions 型別，避免與
-// node_modules/terser 的獨立型別定義發生衝突。
+/** Production: retain only console.warn/error, remove ordinary comments. */
 type ViteTerserOptions = NonNullable<NonNullable<UserConfig['build']>['terserOptions']>
 
 const bigstockTerserOptions: ViteTerserOptions = {
   compress: {
-    // 只移除列出的 Console 方法
-    // console.warn / console.error 保留
     drop_console: [
-      'log',
-      'info',
-      'debug',
-      'trace',
-      'table',
-      'dir',
-      'dirxml',
-      'group',
-      'groupCollapsed',
-      'groupEnd',
-      'time',
-      'timeEnd',
-      'timeLog',
-      'count',
-      'countReset',
-      'assert',
-      'clear',
-      'profile',
-      'profileEnd',
-      'timeStamp',
+      'log', 'info', 'debug', 'trace', 'table', 'dir', 'dirxml',
+      'group', 'groupCollapsed', 'groupEnd', 'time', 'timeEnd',
+      'timeLog', 'count', 'countReset', 'assert', 'clear',
+      'profile', 'profileEnd', 'timeStamp',
     ],
-
     drop_debugger: true,
     dead_code: true,
     passes: 2,
   },
-
   mangle: true,
-
-  format: {
-    comments: false,
-  },
+  format: { comments: false },
 }
 
-// ============================================================
-// Firebase Messaging Service Worker Plugin
-// ============================================================
-
-function firebaseMessagingServiceWorkerPlugin(mode: string, env: Record<string, string>): Plugin {
+/**
+ * ============================================================
+ * Firebase Messaging Service Worker Plugin
+ * ============================================================
+ *
+ * Development:
+ *
+ * src/firebase/firebase-messaging-sw.ts
+ *         ↓ esbuild
+ * /firebase-messaging-sw.js
+ *
+ * Production:
+ *
+ * src/firebase/firebase-messaging-sw.ts
+ *         ↓ Vite Build
+ * dist/firebase-messaging-sw.js
+ *
+ * 保留：
+ * - TypeScript Service Worker
+ * - Firebase SDK Imports
+ * - runtime-config.json loaded at service worker startup
+ * - 單獨的 Service Worker Bundle
+ */
+function firebaseMessagingServiceWorkerPlugin(mode: string): Plugin {
   let isBuild = false
-
   const serviceWorkerEntry = resolve(process.cwd(), 'src/firebase/firebase-messaging-sw.ts')
-
-  // 將 VITE_* 環境變數提供給開發環境的 esbuild
-  const defineEnv: Record<string, string> = {}
-
-  for (const [key, value] of Object.entries(env)) {
-    if (key.startsWith('VITE_')) {
-      defineEnv[`import.meta.env.${key}`] = JSON.stringify(value)
-    }
-  }
 
   return {
     name: 'firebase-messaging-service-worker',
-
-    // 判斷目前是否正在執行 Vite Build
     configResolved(config) {
       isBuild = config.command === 'build'
     },
 
-    // ========================================================
-    // Development Service Worker
-    // ========================================================
-
+    /**
+     * --------------------------------------------------------
+     * Development
+     * --------------------------------------------------------
+     *
+     * 動態處理：
+     * /firebase-messaging-sw.js
+     */
     configureServer(server) {
       server.middlewares.use(
         '/firebase-messaging-sw.js',
@@ -97,17 +80,19 @@ function firebaseMessagingServiceWorkerPlugin(mode: string, env: Record<string, 
               entryPoints: [serviceWorkerEntry],
 
               write: false,
+
               bundle: true,
+
               platform: 'browser',
+
               format: 'iife',
+
               target: 'es2020',
 
               define: {
-                ...defineEnv,
                 global: 'globalThis',
               },
 
-              // 僅開發環境使用 Inline Source Map
               sourcemap: 'inline',
             })
 
@@ -135,42 +120,41 @@ function firebaseMessagingServiceWorkerPlugin(mode: string, env: Record<string, 
       )
     },
 
-    // ========================================================
-    // Production Service Worker
-    // ========================================================
-
+    /**
+     * --------------------------------------------------------
+     * Production
+     * --------------------------------------------------------
+     *
+     * Vue 主程式 Build 完成後，
+     * 再將 Firebase Messaging Service Worker
+     * 打包至 dist 根目錄。
+     */
     async closeBundle() {
-      // 僅在 Build 時執行第二次 Vite Build
-      if (!isBuild) {
-        return
-      }
-
+      if (!isBuild) return
       await viteBuild({
-        // 不重新讀取外層 vite.config.ts
         configFile: false,
 
         mode,
+
         publicDir: false,
 
-        // 保留原本的 SockJS / Firebase 相容設定
+        /**
+         * 此設定是獨立的第二次 Vite Build。
+         *
+         * 不會自動繼承外層 Vite define。
+         */
         define: {
           global: 'globalThis',
         },
 
         build: {
-          // 不清除主程式產生的 dist
           emptyOutDir: false,
 
           outDir: resolve(process.cwd(), 'dist'),
 
           target: 'es2020',
-
-          // 正式環境關閉 Source Map
           sourcemap: false,
-
-          // Service Worker 也使用 Terser
           minify: 'terser',
-
           terserOptions: bigstockTerserOptions,
 
           lib: {
@@ -192,72 +176,80 @@ function firebaseMessagingServiceWorkerPlugin(mode: string, env: Record<string, 
   }
 }
 
-// ============================================================
-// BigStock Vite Configuration
-// ============================================================
-
+/**
+ * ============================================================
+ * BigStock Vite Configuration
+ * ============================================================
+ */
 export default defineConfig(({ mode, command }) => {
   const productionBuild = command === 'build' && mode === 'production'
-
-  // Production 預設啟用 K 線額外混淆
   const enableChartObfuscation = productionBuild && process.env.BIGSTOCK_CHART_OBFUSCATE !== 'false'
-
   const env = loadEnv(mode, process.cwd(), '')
 
-  // Development Backend URL
-  // Production 由 Docker Nginx Proxy 處理
+  /**
+   * Backend URL 僅供 Development Proxy 使用。
+   *
+   * Production 由 Docker Nginx Proxy 負責。
+   */
   const apiTarget = env.VITE_APP_BASE_URL
 
   const wsTarget = env.VITE_WS_BASE_URL || env.VITE_APP_BASE_URL
 
   return {
-    // ========================================================
-    // Plugins
-    // ========================================================
-
+    /**
+     * --------------------------------------------------------
+     * Vue / Firebase Plugins
+     * --------------------------------------------------------
+     */
     plugins: [
       vue(),
-
-      // 正式打包不載入 Vue DevTools Plugin
       ...(productionBuild ? [] : [vueDevTools()]),
-
-      // Firebase Messaging Service Worker
-      firebaseMessagingServiceWorkerPlugin(mode, env),
-
-      // K 線圖額外混淆
+      firebaseMessagingServiceWorkerPlugin(mode),
       chartObfuscationPlugin({
         enabled: enableChartObfuscation,
-
-        targetPaths: ['/src/utils/marketIndicators.ts', '/src/utils/marketHistoryParser.ts'],
-
+        targetPaths: [
+          '/src/utils/marketIndicators.ts',
+          '/src/utils/marketHistoryParser.ts',
+        ],
         threshold: 0.15,
       }),
     ],
 
-    // ========================================================
-    // Browser Compatibility
-    // ========================================================
-
-    // 避免 SockJS：
-    // ReferenceError: global is not defined
+    /**
+     * --------------------------------------------------------
+     * Browser Compatibility
+     * --------------------------------------------------------
+     *
+     * 避免 sockjs-client 在瀏覽器執行時：
+     *
+     * ReferenceError: global is not defined
+     *
+     * Development / Production 都生效。
+     */
     define: {
       global: 'globalThis',
     },
 
-    // ========================================================
-    // Alias
-    // ========================================================
-
+    /**
+     * --------------------------------------------------------
+     * Alias
+     * --------------------------------------------------------
+     */
     resolve: {
       alias: {
         '@': fileURLToPath(new URL('./src', import.meta.url)),
       },
     },
 
-    // ========================================================
-    // Development Server
-    // ========================================================
-
+    /**
+     * --------------------------------------------------------
+     * Development Server
+     * --------------------------------------------------------
+     *
+     * 只在 npm run dev 時生效。
+     *
+     * Docker Production 不使用此設定。
+     */
     server: {
       host: '0.0.0.0',
 
@@ -266,9 +258,21 @@ export default defineConfig(({ mode, command }) => {
       strictPort: true,
 
       proxy: {
-        // REST API
-        // /api/auth/tempToken -> /auth/tempToken
-        // /api/device/register -> /device/register
+        /**
+         * ----------------------------------------------------
+         * REST API
+         * ----------------------------------------------------
+         *
+         * Frontend:
+         * /api/auth/tempToken
+         * /api/device/register
+         * /api/biz/market/USHistory
+         *
+         * Backend:
+         * /auth/tempToken
+         * /device/register
+         * /biz/market/USHistory
+         */
         '/api': {
           target: apiTarget,
 
@@ -277,7 +281,24 @@ export default defineConfig(({ mode, command }) => {
           rewrite: (path: string) => path.replace(/^\/api(?=\/|$)/, ''),
         },
 
-        // SockJS / STOMP
+        /**
+         * ----------------------------------------------------
+         * SockJS / STOMP
+         * ----------------------------------------------------
+         *
+         * Frontend:
+         * /ws?token=...
+         * /ws/info
+         * /ws/.../websocket
+         * /ws/.../xhr_streaming
+         *
+         * Backend:
+         * 相同 /ws 路徑
+         *
+         * ws: true 支援 WebSocket Upgrade。
+         *
+         * Vite Proxy 也會處理 SockJS HTTP Transport。
+         */
         '/ws': {
           target: wsTarget,
 
@@ -288,10 +309,11 @@ export default defineConfig(({ mode, command }) => {
       },
     },
 
-    // ========================================================
-    // Production Build
-    // ========================================================
-
+    /**
+     * --------------------------------------------------------
+     * Production Build
+     * --------------------------------------------------------
+     */
     build: {
       target: 'es2020',
 
@@ -299,14 +321,33 @@ export default defineConfig(({ mode, command }) => {
 
       emptyOutDir: true,
 
-      // 正式環境不輸出 Source Map
       sourcemap: false,
-
-      // Production 使用 Terser
       minify: productionBuild ? 'terser' : false,
-
-      // 使用 Vite 型別的 Terser 設定
       terserOptions: bigstockTerserOptions,
+
+      // 僅主程式使用匿名化檔名；FCM Service Worker 維持固定 URL。
+      rollupOptions: {
+        output: {
+          // 所有入口 JS、動態 Chunk、CSS、圖片皆使用 hash 命名。
+          entryFileNames: 'assets/j-[hash].js',
+          chunkFileNames: 'assets/j-[hash].js',
+          assetFileNames: 'assets/r-[hash][extname]',
+
+          manualChunks(id) {
+            const normalized = id.replace(/\\/g, '/')
+            const cleanId = normalized.split('?')[0]
+
+            if (
+              cleanId.endsWith('/src/utils/marketIndicators.ts') ||
+              cleanId.endsWith('/src/utils/marketHistoryParser.ts')
+            ) {
+              return 'x' // Chunk 內部識別名稱，不會出現在輸出檔名
+            }
+
+            return undefined
+          },
+        },
+      },
     },
   }
 })

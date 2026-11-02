@@ -11,6 +11,7 @@
 <script setup lang="ts">
   import { ref, onMounted, onUnmounted } from 'vue'
   import { loadTurnstile } from '../services/turnstileLoader'
+  import { getRuntimeConfig } from '@/config/runtimeConfig'
 
   const props = withDefaults(
     defineProps<{
@@ -32,7 +33,7 @@
   const container = ref<HTMLElement | null>(null)
   const errorMessage = ref('')
 
-  const siteKey = import.meta.env.VITE_TURNSTILE_SITE_KEY
+  const siteKey = getRuntimeConfig().TURNSTILE_SITE_KEY
 
   let widgetId: string | null = null
   let destroyed = false

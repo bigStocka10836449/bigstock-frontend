@@ -1,3 +1,4 @@
+import { storageShield } from '@/utils/storageShield'
 import apiClient from '@/router/bstockAxios'
 import type { StockInfo, TagStocks, TagsMapping } from '@/types/industry'
 
@@ -29,7 +30,6 @@ export async function getStockTags(stockCode: string): Promise<unknown> {
  * 這裡快取的是公開股票名錄，不是 JWT 或使用者個資。
  */
 const STOCK_INFO_URL = '/biz/stockInfo'
-const STOCK_INFO_CACHE_KEY = 'bigstock:stock-info:v2'
 const STOCK_INFO_TTL_MS = 24 * 60 * 60 * 1000
 
 interface StockInfoCache {
@@ -51,10 +51,8 @@ function isStockInfoArray(value: unknown): value is StockInfo[] {
 
 function readStockInfoCache(): StockInfoCache | null {
   try {
-    const raw = localStorage.getItem(STOCK_INFO_CACHE_KEY)
-    if (!raw) return null
-
-    const value: unknown = JSON.parse(raw)
+    const value: unknown = storageShield.getStockInfo<StockInfoCache>()
+    if (!value) return null
     if (!value || typeof value !== 'object') return null
 
     const candidate = value as Partial<StockInfoCache>
@@ -75,7 +73,7 @@ function readStockInfoCache(): StockInfoCache | null {
 function writeStockInfoCache(stocks: StockInfo[]): void {
   try {
     const entry: StockInfoCache = { savedAt: Date.now(), stocks }
-    localStorage.setItem(STOCK_INFO_CACHE_KEY, JSON.stringify(entry))
+    storageShield.setStockInfo(entry)
   } catch (error) {
     // 儲存空間不足／使用者禁止儲存時，仍允許正常使用 API 結果。
     console.warn('[Industry] 無法儲存 stockInfo localStorage 快取', error)
@@ -120,7 +118,7 @@ export function getAllStockInfo(forceRefresh = false): Promise<StockInfo[]> {
 /** 需要立即更新時可先清除快取，下一次載入會重新抓取。 */
 export function clearStockInfoCache(): void {
   try {
-    localStorage.removeItem(STOCK_INFO_CACHE_KEY)
+    storageShield.removeStockInfo()
   } catch (error) {
     console.warn('[Industry] 無法清除 stockInfo 快取', error)
   }

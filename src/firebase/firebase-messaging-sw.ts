@@ -11,100 +11,46 @@ import {
 declare const self: ServiceWorkerGlobalScope
 
 
-const firebaseConfig = {
-
-  apiKey:
-    import.meta.env.VITE_FIREBASE_API_KEY,
-
-  authDomain:
-    import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
-
-  projectId:
-    import.meta.env.VITE_FIREBASE_PROJECT_ID,
-
-  storageBucket:
-    import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
-
-  messagingSenderId:
-    import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
-
-  appId:
-    import.meta.env.VITE_FIREBASE_APP_ID,
+// The service worker cannot access window.__APP_CONFIG__.
+// Load the same public settings from a runtime-generated JSON resource.
+interface WorkerRuntimeConfig {
+  FIREBASE_API_KEY: string
+  FIREBASE_AUTH_DOMAIN: string
+  FIREBASE_PROJECT_ID: string
+  FIREBASE_STORAGE_BUCKET: string
+  FIREBASE_MESSAGING_SENDER_ID: string
+  FIREBASE_APP_ID: string
 }
 
+async function initializeBackgroundMessaging(): Promise<void> {
+  const response = await fetch('/runtime-config.json', { cache: 'no-store' })
+  if (!response.ok) throw new Error(`FCM runtime config HTTP ${response.status}`)
+  const runtime = await response.json() as WorkerRuntimeConfig
+  const app = initializeApp({
+    apiKey: runtime.FIREBASE_API_KEY,
+    authDomain: runtime.FIREBASE_AUTH_DOMAIN,
+    projectId: runtime.FIREBASE_PROJECT_ID,
+    storageBucket: runtime.FIREBASE_STORAGE_BUCKET,
+    messagingSenderId: runtime.FIREBASE_MESSAGING_SENDER_ID,
+    appId: runtime.FIREBASE_APP_ID,
+  })
+  const messaging = getMessaging(app)
+  onBackgroundMessage(messaging, (payload) => {
+    if (payload.data?.type === 'DEVICE_VERIFY') return
 
-const firebaseApp =
-  initializeApp(firebaseConfig)
-
-
-const messaging =
-  getMessaging(firebaseApp)
-
-
-onBackgroundMessage(
-  messaging,
-  (payload) => {
-
-    console.log(
-      '[FCM SW] Background message:',
-      payload,
-    )
-
-
-    /*
-     * Don't display DEVICE_VERIFY
-     * as a notification.
-     */
-    if (
-      payload.data?.type ===
-      'DEVICE_VERIFY'
-    ) {
-
-      console.log(
-        '[FCM SW] DEVICE_VERIFY received.',
-      )
-
-      return
-    }
-
-
-    const title =
-      payload.notification?.title
-      ??
-      payload.data?.title
-      ??
-      'BigStock'
-
-
+    const title = payload.notification?.title ?? payload.data?.title ?? 'BigStock'
     const options: NotificationOptions = {
-
-      body:
-        payload.notification?.body
-        ??
-        payload.data?.body
-        ??
-        '',
-
-      icon:
-        '/favicon.ico',
-
-      data: {
-
-        url:
-          payload.data?.url
-          ??
-          '/',
-      },
+      body: payload.notification?.body ?? payload.data?.body ?? '',
+      icon: '/favicon.ico',
+      data: { url: payload.data?.url ?? '/' },
     }
+    void self.registration.showNotification(title, options)
+  })
+}
 
-
-    void self.registration.showNotification(
-      title,
-      options,
-    )
-  },
-)
-
+const messagingReady = initializeBackgroundMessaging()
+messagingReady.catch(error => console.error('[FCM SW] initialization failed', error))
+self.addEventListener('install', event => { event.waitUntil(messagingReady) })
 
 self.addEventListener(
   'notificationclick',

@@ -1,5 +1,4 @@
 import type { Plugin } from 'vite'
-
 import JavaScriptObfuscator from 'javascript-obfuscator'
 
 export interface ChartObfuscationOptions {
@@ -9,124 +8,62 @@ export interface ChartObfuscationOptions {
 }
 
 /**
- * BigStock Chart Obfuscation Plugin
- *
- * 混淆單位：JavaScript Chunk
- *
- * 如果 Chunk 包含第三方函式庫，
- * 第一階段先跳過，避免影響 ECharts 等套件。
+ * Obfuscation is applied to *chunks*, not individual source files.
+ * Inspect the build log to ensure third-party libraries aren't co-bundled.
  */
 export function chartObfuscationPlugin(options: ChartObfuscationOptions): Plugin {
-  const targetPaths = (
-    options.targetPaths ?? ['/src/utils/marketIndicators.ts', '/src/utils/marketHistoryParser.ts']
-  ).map((path) => path.replace(/\\/g, '/'))
+  const targetPaths = (options.targetPaths ?? [
+    '/src/utils/marketIndicators.ts',
+    '/src/utils/marketHistoryParser.ts',
+  ]).map((p) => p.replace(/\\/g, '/'))
 
   let matched = 0
-
   return {
     name: 'bigstock-chart-obfuscation',
-
     apply: 'build',
-
     enforce: 'post',
+    // 在 hash 計算前改寫 Chunk，以免檔名 hash 對不上最終程式碼。
+    renderChunk(code, chunk) {
+      if (!options.enabled) return null
 
-    generateBundle(_options, bundle) {
-      matched = 0
+      const moduleIds = Object.keys(chunk.modules).map((p) => p.replace(/\\/g, '/'))
+      const selected = moduleIds.filter((id) => targetPaths.some((p) => id.includes(p)))
+      if (selected.length === 0) return null
 
-      if (!options.enabled) {
-        this.warn('[BigStock] Chart obfuscation disabled for this build')
-
-        return
+      const thirdParty = moduleIds.filter((id) => id.includes('/node_modules/'))
+      if (thirdParty.length > 0) {
+        this.error(`[BigStock] Protected chunk contains ${thirdParty.length} third-party modules: ${chunk.fileName}`)
       }
 
-      for (const chunk of Object.values(bundle)) {
-        if (chunk.type !== 'chunk') {
-          continue
-        }
+      const result = JavaScriptObfuscator.obfuscate(code, {
+        compact: true,
+        identifierNamesGenerator: 'hexadecimal',
+        controlFlowFlattening: true,
+        controlFlowFlatteningThreshold: options.threshold ?? 0.15,
+        deadCodeInjection: false,
+        stringArray: true,
+        stringArrayThreshold: 0.7,
+        stringArrayEncoding: ['base64'],
+        stringArrayRotate: true,
+        stringArrayShuffle: true,
+        renameGlobals: false,
+        renameProperties: false,
+        disableConsoleOutput: false,
+        debugProtection: false,
+        selfDefending: false,
+        sourceMap: false,
+        seed: 2026,
+      })
 
-        if (!chunk.fileName.endsWith('.js')) {
-          continue
-        }
+      matched += 1
+      const output = result.getObfuscatedCode()
+      this.warn(`[BigStock] Obfuscated protected chunk (${selected.length} modules): ${Buffer.byteLength(code, 'utf8')} -> ${Buffer.byteLength(output, 'utf8')} bytes`)
+      return { code: output, map: null }
+    },
 
-        const moduleIds = Object.keys(chunk.modules).map((path) => path.replace(/\\/g, '/'))
-
-        // 找出需要保護的模組
-        const selected = moduleIds.filter((id) => targetPaths.some((path) => id.includes(path)))
-
-        if (selected.length === 0) {
-          continue
-        }
-
-        // 避免混淆第三方函式庫
-        const thirdParty = moduleIds.filter((id) => id.includes('/node_modules/'))
-
-        if (thirdParty.length > 0) {
-          this.warn(
-            `[BigStock] Skipping ${chunk.fileName}: ` +
-              `${thirdParty.length} third-party modules found.`,
-          )
-
-          continue
-        }
-
-        const originalSize = Buffer.byteLength(chunk.code, 'utf8')
-
-        // ====================================================
-        // JavaScript Obfuscation
-        // ====================================================
-
-        const result = JavaScriptObfuscator.obfuscate(chunk.code, {
-          compact: true,
-
-          identifierNamesGenerator: 'hexadecimal',
-
-          controlFlowFlattening: true,
-
-          controlFlowFlatteningThreshold: options.threshold ?? 0.15,
-
-          stringArray: true,
-
-          stringArrayThreshold: 0.7,
-
-          stringArrayEncoding: ['base64'],
-
-          stringArrayRotate: true,
-
-          stringArrayShuffle: true,
-
-          deadCodeInjection: false,
-
-          renameGlobals: false,
-
-          renameProperties: false,
-
-          // 不停用 console.warn/error
-          disableConsoleOutput: false,
-
-          debugProtection: false,
-
-          selfDefending: false,
-
-          sourceMap: false,
-
-          seed: 2026,
-        })
-
-        chunk.code = result.getObfuscatedCode()
-
-        matched++
-
-        const newSize = Buffer.byteLength(chunk.code, 'utf8')
-
-        this.warn(
-          `[BigStock] Obfuscated ${chunk.fileName}: ` +
-            `${originalSize} -> ${newSize} bytes; ` +
-            `sources: ${selected.join(', ')}`,
-        )
-      }
-
-      if (!matched) {
-        this.warn('[BigStock] No isolated chart chunk was obfuscated.')
+    generateBundle() {
+      if (options.enabled && matched === 0) {
+        this.error('[BigStock] Chart obfuscation was requested but no chart chunk was obfuscated.')
       }
     },
   }

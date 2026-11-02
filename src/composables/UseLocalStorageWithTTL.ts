@@ -1,17 +1,16 @@
 import { ref, onUnmounted } from 'vue'
 
 export function useLocalStorageWithTTL<T>(key: string, defaultValue: T, ttlMs: number = 2 * 60 * 60 * 1000) {
-  const now = Date.now()
-  const raw = localStorage.getItem(key)
   const data = ref<T>(defaultValue)
   const isExpired = ref(false)
 
   function parseStorage() {
     try {
+      const raw = localStorage.getItem(key)
       if (raw) {
         const parsed = JSON.parse(raw)
         if (parsed.value && parsed.expires) {
-          if (now < parsed.expires) {
+          if (Date.now() < parsed.expires) {
             data.value = parsed.value
             isExpired.value = false
           } else {

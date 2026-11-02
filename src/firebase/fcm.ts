@@ -1,3 +1,4 @@
+import { getRuntimeConfig } from '@/config/runtimeConfig'
 import {
   getMessaging,
   getToken,
@@ -117,7 +118,7 @@ export async function getFcmToken(): Promise<string> {
    * 或 Firebase Admin Private Key。
    */
   const vapidKey =
-    import.meta.env.VITE_FIREBASE_VAPID_KEY
+    getRuntimeConfig().FIREBASE_VAPID_KEY
 
 
   /*

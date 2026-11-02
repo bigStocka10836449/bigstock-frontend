@@ -15,9 +15,11 @@
   "dependencies": {
     "@stomp/stompjs": "^7.3.0",
     "axios": "^1.7.7",
+    "crypto-js": "^4.2.0",
     "dotenv": "^16.4.5",
     "echarts": "^5.5.1",
     "firebase": "^12.19.0",
+    "lz-string": "^1.5.0",
     "pinia": "^2.2.6",
     "sockjs-client": "^1.6.1",
     "vue": "^3.5.12",
@@ -25,6 +27,7 @@
   },
   "devDependencies": {
     "@tsconfig/node22": "^22.0.0",
+    "@types/crypto-js": "^4.2.2",
     "@types/node": "^22.9.0",
     "@types/sockjs-client": "^1.5.4",
     "@vitejs/plugin-vue": "^5.1.4",

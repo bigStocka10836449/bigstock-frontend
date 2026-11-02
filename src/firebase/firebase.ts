@@ -1,13 +1,16 @@
+import { getRuntimeConfig } from '@/config/runtimeConfig'
 import { initializeApp } from 'firebase/app'
 import type { FirebaseApp } from 'firebase/app'
 
+const runtime = getRuntimeConfig()
+
 const firebaseConfig = {
-  apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
-  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
-  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
-  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
-  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
-  appId: import.meta.env.VITE_FIREBASE_APP_ID,
+  apiKey: runtime.FIREBASE_API_KEY,
+  authDomain: runtime.FIREBASE_AUTH_DOMAIN,
+  projectId: runtime.FIREBASE_PROJECT_ID,
+  storageBucket: runtime.FIREBASE_STORAGE_BUCKET,
+  messagingSenderId: runtime.FIREBASE_MESSAGING_SENDER_ID,
+  appId: runtime.FIREBASE_APP_ID,
 }
 
 const firebaseApp: FirebaseApp = initializeApp(firebaseConfig)
