@@ -1,33 +1,54 @@
 #!/bin/sh
 set -eu
-: "${APP_BASE_URL:?required}"
-: "${WEB_API_BASE_URL:?required}"
-: "${FIREBASE_API_KEY:?required}"
-: "${FIREBASE_AUTH_DOMAIN:?required}"
-: "${FIREBASE_PROJECT_ID:?required}"
-: "${FIREBASE_STORAGE_BUCKET:?required}"
-: "${FIREBASE_MESSAGING_SENDER_ID:?required}"
-: "${FIREBASE_APP_ID:?required}"
-: "${FIREBASE_VAPID_KEY:?required}"
-: "${TURNSTILE_SITE_KEY:?required}"
+
+OUTPUT_DIR="/usr/share/nginx/html"
+
+# ==========================================
+# Validate required environment variables
+# ==========================================
+
+: "${FIREBASE_API_KEY:?FIREBASE_API_KEY required}"
+: "${FIREBASE_AUTH_DOMAIN:?FIREBASE_AUTH_DOMAIN required}"
+: "${FIREBASE_PROJECT_ID:?FIREBASE_PROJECT_ID required}"
+: "${FIREBASE_STORAGE_BUCKET:?FIREBASE_STORAGE_BUCKET required}"
+: "${FIREBASE_MESSAGING_SENDER_ID:?FIREBASE_MESSAGING_SENDER_ID required}"
+: "${FIREBASE_APP_ID:?FIREBASE_APP_ID required}"
+: "${FIREBASE_VAPID_KEY:?FIREBASE_VAPID_KEY required}"
+
+: "${TURNSTILE_SITE_KEY:?TURNSTILE_SITE_KEY required}"
+
+# ==========================================
+# Generate Runtime Config JSON
+# ==========================================
 
 jq -n \
-  --arg base "$APP_BASE_URL" \
-  --arg web "$WEB_API_BASE_URL" \
-  --arg api "$FIREBASE_API_KEY" \
-  --arg auth "$FIREBASE_AUTH_DOMAIN" \
-  --arg project "$FIREBASE_PROJECT_ID" \
-  --arg bucket "$FIREBASE_STORAGE_BUCKET" \
-  --arg sender "$FIREBASE_MESSAGING_SENDER_ID" \
-  --arg app "$FIREBASE_APP_ID" \
-  --arg vapid "$FIREBASE_VAPID_KEY" \
-  --arg turnstile "$TURNSTILE_SITE_KEY" \
-  '{APP_BASE_URL:$base, WEB_API_BASE_URL:$web, FIREBASE_API_KEY:$api,
-    FIREBASE_AUTH_DOMAIN:$auth, FIREBASE_PROJECT_ID:$project,
-    FIREBASE_STORAGE_BUCKET:$bucket, FIREBASE_MESSAGING_SENDER_ID:$sender,
-    FIREBASE_APP_ID:$app, FIREBASE_VAPID_KEY:$vapid,
-    TURNSTILE_SITE_KEY:$turnstile}' \
-    > /usr/share/nginx/html/runtime-config.json
-# Use JSON serialization to prevent JS string injection from env values.
-{ printf 'window.__APP_CONFIG__ = '; cat /usr/share/nginx/html/runtime-config.json; printf ';\n'; } \
-  > /usr/share/nginx/html/config.js
+  --arg apiKey "$FIREBASE_API_KEY" \
+  --arg authDomain "$FIREBASE_AUTH_DOMAIN" \
+  --arg projectId "$FIREBASE_PROJECT_ID" \
+  --arg storageBucket "$FIREBASE_STORAGE_BUCKET" \
+  --arg messagingSenderId "$FIREBASE_MESSAGING_SENDER_ID" \
+  --arg appId "$FIREBASE_APP_ID" \
+  --arg vapidKey "$FIREBASE_VAPID_KEY" \
+  --arg turnstileSiteKey "$TURNSTILE_SITE_KEY" \
+  '{
+    FIREBASE_API_KEY: $apiKey,
+    FIREBASE_AUTH_DOMAIN: $authDomain,
+    FIREBASE_PROJECT_ID: $projectId,
+    FIREBASE_STORAGE_BUCKET: $storageBucket,
+    FIREBASE_MESSAGING_SENDER_ID: $messagingSenderId,
+    FIREBASE_APP_ID: $appId,
+    FIREBASE_VAPID_KEY: $vapidKey,
+    TURNSTILE_SITE_KEY: $turnstileSiteKey
+  }' > "$OUTPUT_DIR/runtime-config.json"
+
+# ==========================================
+# Generate Vue Runtime Config
+# ==========================================
+
+{
+  printf 'window.__APP_CONFIG__ = '
+  cat "$OUTPUT_DIR/runtime-config.json"
+  printf ';\n'
+} > "$OUTPUT_DIR/config.js"
+
+echo "[BigStock] Runtime configuration generated successfully."
