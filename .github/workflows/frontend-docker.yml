@@ -58,12 +58,26 @@ jobs:
       # 6. Verify Build Artifacts
       # ==========================================
       - name: Verify Build Artifacts
+        shell: bash
         run: |
-          test -f dist/index.html
-          test -f dist/firebase-messaging-sw.js
-          test -f Dockerfile
-          test -f nginx/default.conf.template
-          test -f docker/40-runtime-config.sh
+          set -euo pipefail
+
+          required_files=(
+            "dist/index.html"
+            "dist/firebase-messaging-sw.js"
+            "Dockerfile"
+            "nginx.conf"
+            "docker/40-runtime-config.sh"
+          )
+
+          for file in "${required_files[@]}"; do
+            if [[ -f "$file" ]]; then
+              echo "OK: $file"
+            else
+              echo "::error::Missing required file: $file"
+              exit 1
+            fi
+          done
 
       # ==========================================
       # 7. Login Docker Registry

@@ -11,7 +11,6 @@ RUN npm ci
 COPY . .
 RUN npm run build
 
-
 # ==========================================
 # Stage 2: Nginx
 # ==========================================
@@ -19,10 +18,9 @@ FROM nginx:alpine
 
 RUN apk add --no-cache jq
 
-# Vue Production Build
 COPY --from=builder /app/dist/ /usr/share/nginx/html/
 
-# Nginx Config
+# Nginx 靜態資源設定
 COPY nginx.conf /etc/nginx/conf.d/default.conf
 
 # Runtime Config
