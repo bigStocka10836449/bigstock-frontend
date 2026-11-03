@@ -177,6 +177,104 @@ function firebaseMessagingServiceWorkerPlugin(mode: string): Plugin {
 }
 
 /**
+ * Development Runtime Configuration.
+ *
+ * Read .env.local through Vite's loadEnv().
+ *
+ * Production continues using Docker runtime config.
+ */
+function developmentRuntimeConfigPlugin(
+  env: Record<string, string>,
+): Plugin {
+
+  const config = {
+    APP_BASE_URL: env.VITE_APP_BASE_URL || '',
+    WEB_API_BASE_URL: '/api',
+
+    FIREBASE_API_KEY:
+      env.VITE_FIREBASE_API_KEY || '',
+
+    FIREBASE_AUTH_DOMAIN:
+      env.VITE_FIREBASE_AUTH_DOMAIN || '',
+
+    FIREBASE_PROJECT_ID:
+      env.VITE_FIREBASE_PROJECT_ID || '',
+
+    FIREBASE_STORAGE_BUCKET:
+      env.VITE_FIREBASE_STORAGE_BUCKET || '',
+
+    FIREBASE_MESSAGING_SENDER_ID:
+      env.VITE_FIREBASE_MESSAGING_SENDER_ID || '',
+
+    FIREBASE_APP_ID:
+      env.VITE_FIREBASE_APP_ID || '',
+
+    FIREBASE_VAPID_KEY:
+      env.VITE_FIREBASE_VAPID_KEY || '',
+
+    TURNSTILE_SITE_KEY:
+      env.VITE_TURNSTILE_SITE_KEY || '',
+  }
+
+  const configJson = JSON.stringify(config)
+
+  return {
+    name: 'bigstock-development-runtime-config',
+
+    configureServer(server) {
+
+      server.middlewares.use((req, res, next) => {
+
+        const pathname =
+          (req.url || '').split('?')[0]
+
+        if (pathname === '/config.js') {
+
+          res.statusCode = 200
+
+          res.setHeader(
+            'Content-Type',
+            'application/javascript; charset=utf-8',
+          )
+
+          res.setHeader(
+            'Cache-Control',
+            'no-store',
+          )
+
+          res.end(
+            `window.__APP_CONFIG__ = ${configJson};`,
+          )
+
+          return
+        }
+
+        if (pathname === '/runtime-config.json') {
+
+          res.statusCode = 200
+
+          res.setHeader(
+            'Content-Type',
+            'application/json; charset=utf-8',
+          )
+
+          res.setHeader(
+            'Cache-Control',
+            'no-store',
+          )
+
+          res.end(configJson)
+
+          return
+        }
+
+        next()
+      })
+    },
+  }
+}
+
+/**
  * ============================================================
  * BigStock Vite Configuration
  * ============================================================
@@ -203,8 +301,15 @@ export default defineConfig(({ mode, command }) => {
      */
     plugins: [
       vue(),
+
+      ...(command === 'serve'
+        ? [developmentRuntimeConfigPlugin(env)]
+        : []),
+
       ...(productionBuild ? [] : [vueDevTools()]),
+
       firebaseMessagingServiceWorkerPlugin(mode),
+
       chartObfuscationPlugin({
         enabled: enableChartObfuscation,
         targetPaths: [

@@ -1,6 +1,7 @@
-import { storageShield } from '@/utils/storageShield'
 import { authTokenManager } from '@/services/authTokenManager'
+
 import type { MarketEvent } from '@/types/market'
+
 import type {
   PageToWorker,
   WorkerToPage,
@@ -13,92 +14,187 @@ export interface MarketWorkerHandle {
 }
 
 /**
- * 每個分頁只連 SharedWorker 的 MessagePort，不自行建立 STOMP 連線。
- * localStorage 與 FCM 邏輯仍在 Vue 頁面執行。
+ * ============================================================
+ * BigStock SharedWorker Client
+ * ============================================================
+ *
+ * Each browser tab communicates with one SharedWorker.
+ *
+ * JWT is never transferred through MessagePort.
  */
+
 export function connectMarketWorker(
   onData: (event: MarketEvent) => void,
   onStatus: (status: SharedMarketStatus) => void,
 ): MarketWorkerHandle {
-  const worker = new SharedWorker(new URL('../workers/market.shared-worker.ts', import.meta.url), {
-    type: 'module',
-    name: 'bigstock-market-shared-v1',
-  })
-  const port = worker.port
-  let closed = false
-  let authFingerprint = storageShield.getAuthTokenFingerprint()
 
-  const send = (message: PageToWorker): void => {
-    if (!closed) port.postMessage(message)
+  const worker = new SharedWorker(
+    new URL(
+      '../workers/market.shared-worker.ts',
+      import.meta.url,
+    ),
+    {
+      type: 'module',
+
+      // Prevent mixing the old JWT protocol with
+      // the new Cookie session protocol.
+      name: 'bigstock-market-shared-v2',
+    },
+  )
+
+  const port = worker.port
+
+  let closed = false
+
+  const sessionRequests = new Set<number>()
+
+  function send(message: PageToWorker): void {
+    if (!closed) {
+      port.postMessage(message)
+    }
   }
 
-  const tokenRequests = new Map<number, true>()
+  /**
+   * Messages from SharedWorker.
+   */
+  port.onmessage = event => {
 
-  port.onmessage = (event) => {
     if (closed) return
+
     const message = event.data as WorkerToPage
-    if (message.type === 'MARKET_EVENT') onData(message.event)
-    else if (message.type === 'STATUS') onStatus(message.status)
-    else if (message.type === 'TOKEN_REQUEST') {
-      tokenRequests.set(message.requestId, true)
+
+    // ========================================================
+    // 1. Market Event
+    // ========================================================
+
+    if (message.type === 'MARKET_EVENT') {
+
+      onData(message.event)
+
+      return
+    }
+
+    // ========================================================
+    // 2. Socket Status
+    // ========================================================
+
+    if (message.type === 'STATUS') {
+
+      onStatus(message.status)
+
+      return
+    }
+
+    // ========================================================
+    // 3. Prepare Cookie Session
+    // ========================================================
+
+    if (message.type === 'SESSION_REQUEST') {
+
+      const requestId = message.requestId
+
+      sessionRequests.add(requestId)
+
       void (async () => {
+
         try {
-          const token = message.forceRefresh
-            ? await authTokenManager.recoverRejectedToken(message.rejectedToken)
-            : await authTokenManager.getValidToken()
-          if (!closed && tokenRequests.has(message.requestId)) {
-            send({ type: 'TOKEN_RESPONSE', requestId: message.requestId, token })
+
+          if (message.forceRefresh) {
+
+            /**
+             * WebSocket authentication was rejected.
+             *
+             * Re-run original FCM verification.
+             */
+            await authTokenManager.refreshToken()
+
+          } else {
+
+            /**
+             * Existing Cookie may still be valid.
+             */
+            await authTokenManager.ensureSession()
           }
-        } catch (error) {
-          if (!closed && tokenRequests.has(message.requestId)) {
+
+          if (
+            !closed &&
+            sessionRequests.has(requestId)
+          ) {
+
             send({
-              type: 'TOKEN_RESPONSE',
-              requestId: message.requestId,
-              error: error instanceof Error ? error.message : String(error),
+              type: 'SESSION_RESPONSE',
+              requestId,
             })
           }
+
+        } catch (error: unknown) {
+
+          if (
+            !closed &&
+            sessionRequests.has(requestId)
+          ) {
+
+            send({
+              type: 'SESSION_RESPONSE',
+              requestId,
+
+              error:
+                error instanceof Error
+                  ? error.message
+                  : String(error),
+            })
+          }
+
         } finally {
-          tokenRequests.delete(message.requestId)
-          authFingerprint = storageShield.getAuthTokenFingerprint()
+
+          sessionRequests.delete(requestId)
         }
       })()
     }
   }
+
   port.start()
-  send({ type: 'HELLO' })
 
-  // Worker 用這個心跳辨識已關閉的分頁；不牽涉市場資料取樣。
-  const heartbeat = setInterval(() => send({ type: 'PING' }), 20_000)
+  send({
+    type: 'HELLO',
+  })
 
-  const onStorage = (event: StorageEvent): void => {
-    if ((event.key === storageShield.authTokenStorageKey || event.key === null) && event.newValue !== authFingerprint) {
-      authFingerprint = event.newValue
-      send({ type: 'AUTH_CHANGED' })
-    }
-  }
-  window.addEventListener('storage', onStorage)
+  /**
+   * Keep the SharedWorker port alive.
+   */
+  const heartbeat = setInterval(() => {
 
-  // 同一分頁登入/登出時，storage event 不會觸發；以焦點事件補查。
-  const onFocus = (): void => {
-    const current = storageShield.getAuthTokenFingerprint()
-    if (current !== authFingerprint) {
-      authFingerprint = current
-      send({ type: 'AUTH_CHANGED' })
-    }
-  }
-  window.addEventListener('focus', onFocus)
+    send({
+      type: 'PING',
+    })
+
+  }, 20_000)
 
   return {
-    retry: () => send({ type: 'RETRY' }),
-    disconnect: () => {
+
+    retry(): void {
+
+      send({
+        type: 'RETRY',
+      })
+    },
+
+    disconnect(): void {
+
       if (closed) return
-      send({ type: 'LEAVE' })
+
+      send({
+        type: 'LEAVE',
+      })
+
       closed = true
+
       clearInterval(heartbeat)
-      window.removeEventListener('storage', onStorage)
-      window.removeEventListener('focus', onFocus)
-      tokenRequests.clear()
+
+      sessionRequests.clear()
+
       port.onmessage = null
+
       port.close()
     },
   }

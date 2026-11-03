@@ -1,391 +1,229 @@
-import { storageShield } from '@/utils/storageShield'
 import axios from 'axios'
+
 import { ensureFcmVerified } from '@/firebase/fcmStartup'
 
 /**
  * ============================================================
- * BigStock - Auth Token Manager
+ * BigStock Web Guest Session Manager
  * ============================================================
  *
- * 全站 JWT 唯一管理入口。
+ * Web JWT is stored in HttpOnly Cookie.
  *
- * 提供：
- * - getToken()
- * - setToken()
- * - getExpirationTime()
- * - isExpiring()
- * - getValidToken()
- * - refreshToken()
- * - clearToken()
+ * No JWT is accessible to frontend JavaScript.
  *
- * REST API / WebSocket 共用這份管理器。
- *
- * JWT 由後端 /auth/tempToken 核發，
- * 不是 Firebase FCM Token。
+ * Original FCM flow remains unchanged.
  */
 
-interface TempTokenResponse {
-  token: string
-  exp?: number | string
+interface WebTokenResponse {
+  authenticated: boolean
+  exp: number | string
 }
 
-interface JwtPayload {
-  exp?: number
-  role?: string | number
-  roles?: Array<string | number>
-}
-
-/**
- * Token 提前更新時間：60 秒。
- *
- * 不沿用原本 15 分鐘，
- * 避免短效 JWT 被過度頻繁刷新。
- */
 const REFRESH_BUFFER_SECONDS = 60
 
 /**
- * 單獨建立 Bootstrap Axios。
+ * Bootstrap API must use a separate Axios instance.
  *
- * 不使用 bstockAxios.ts 的 apiClient，
- * 避免：
+ * Avoid circular dependencies:
  *
  * authTokenManager
- *   -> apiClient interceptor
- *   -> authTokenManager
- *
- * 的循環相依。
+ *    -> bstockAxios
+ *    -> authTokenManager
  */
 const bootstrapClient = axios.create({
   baseURL: '/api',
+
+  timeout: 30000,
+
+  withCredentials: true,
+
   headers: {
     'Content-Type': 'application/json',
   },
-  withCredentials: true,
+
+  xsrfCookieName: 'XSRF-TOKEN',
+  xsrfHeaderName: 'X-XSRF-TOKEN',
+  withXSRFToken: true,
 })
 
 /**
- * 多個 REST API / WebSocket 同時發現 JWT
- * 即將過期時，只允許執行一次更新。
+ * Session expiration in Unix seconds.
+ *
+ * null means unknown.
+ *
+ * After browser refresh, HttpOnly Cookie may
+ * still be valid, so unknown does not mean expired.
  */
-let refreshPromise: Promise<string> | null = null
+let sessionExpiresAt: number | null = null
 
 /**
- * 本次頁面執行期間的 Token 版本。
- *
- * 防止使用者登出或切換帳號後，
- * 舊的非同步更新結果覆寫新狀態。
+ * Concurrent requests share one refresh operation.
  */
-let tokenGeneration = 0
-
-function normalizeToken(token: string): string {
-  return token.replace(/^Bearer\s+/i, '').trim()
-}
-
-function readJwtPayload(
-  token: string,
-): JwtPayload | null {
-  try {
-    const jwt = normalizeToken(token)
-    const encoded = jwt.split('.')[1]
-
-    if (!encoded) return null
-
-    const base64 = encoded
-      .replace(/-/g, '+')
-      .replace(/_/g, '/')
-
-    const padded = base64.padEnd(
-      Math.ceil(base64.length / 4) * 4,
-      '=',
-    )
-
-    const decoded = JSON.parse(
-      atob(padded),
-    ) as JwtPayload
-
-    return decoded
-  } catch {
-    return null
-  }
-}
+let refreshPromise: Promise<void> | null = null
 
 /**
- * 將後端 exp 正規化成 Unix seconds。
- *
- * JWT 標準 exp 使用秒。
- * 若後端另外回傳毫秒值也一併支援。
+ * Used to prevent repeated 401 requests from
+ * triggering sequential refresh operations.
  */
-function normalizeExpiry(
-  value: unknown,
-): number | null {
-  if (
-    typeof value !== 'number' &&
-    typeof value !== 'string'
-  ) {
-    return null
+let sessionVersion = 0
+
+/**
+ * Converts Date / Unix seconds / Unix milliseconds
+ * to Unix seconds.
+ */
+function normalizeExpiry(value: unknown): number {
+
+  if (typeof value === 'number') {
+
+    if (!Number.isFinite(value) || value <= 0) {
+      throw new Error('Invalid session expiration')
+    }
+
+    return value > 1e12
+      ? Math.floor(value / 1000)
+      : Math.floor(value)
   }
 
-  const parsed = Number(value)
+  if (typeof value === 'string') {
 
-  if (!Number.isFinite(parsed) || parsed <= 0) {
-    return null
+    const trimmed = value.trim()
+
+    if (!trimmed) {
+      throw new Error('Empty session expiration')
+    }
+
+    const numeric = Number(trimmed)
+
+    if (Number.isFinite(numeric) && numeric > 0) {
+
+      return numeric > 1e12
+        ? Math.floor(numeric / 1000)
+        : Math.floor(numeric)
+    }
+
+    const timestamp = Date.parse(trimmed)
+
+    if (Number.isFinite(timestamp)) {
+      return Math.floor(timestamp / 1000)
+    }
   }
 
-  return parsed > 1e12
-    ? Math.floor(parsed / 1000)
-    : Math.floor(parsed)
+  throw new Error('Unsupported session expiration format')
 }
 
 /**
- * 讀取本地儲存的 JWT。
- *
- * 回傳完整 Bearer 格式，
- * 供 Axios Authorization Header 使用。
+ * Return current expiration.
  */
-function getToken(): string | null {
-  const raw = storageShield.getAuthToken()
-
-  if (!raw) return null
-
-  const jwt = normalizeToken(raw)
-
-  return jwt ? `Bearer ${jwt}` : null
+function getExpirationTime(): number | null {
+  return sessionExpiresAt
 }
 
 /**
- * JWT 寫入單一入口。
+ * Return current session generation.
  *
- * 必須同步更新 tokenExp，
- * 避免儲存新的 JWT 卻保留舊到期時間。
+ * Used to coordinate concurrent 401 responses.
  */
-function setToken(
-  token: string,
-  serverExp?: number | string | null,
-): void {
-  const jwt = normalizeToken(token)
-
-  if (!jwt) {
-    throw new Error('JWT 不可為空')
-  }
-
-  const exp =
-    normalizeExpiry(readJwtPayload(jwt)?.exp) ??
-    normalizeExpiry(serverExp)
-
-  storageShield.setAuthToken(`Bearer ${jwt}`)
-
-  if (exp !== null) {
-    storageShield.setTokenExp(exp)
-  } else {
-    storageShield.removeTokenExp()
-  }
-
-  tokenGeneration++
+function getSessionVersion(): number {
+  return sessionVersion
 }
 
 /**
- * 優先讀取 JWT Payload 裡的 exp。
+ * Whether known session expiration is approaching.
  *
- * 舊版儲存的 tokenExp 僅作為備援。
- */
-function getExpirationTime(
-  token?: string | null,
-): number | null {
-  const target = token ?? getToken()
-
-  if (!target) return null
-
-  const jwtExp = normalizeExpiry(
-    readJwtPayload(target)?.exp,
-  )
-
-  if (jwtExp !== null) {
-    return jwtExp
-  }
-
-  /*
-   * 只有確認目標是目前儲存的 JWT，
-   * 才允許使用 localStorage.tokenExp。
-   */
-  const stored = getToken()
-
-  if (
-    stored &&
-    normalizeToken(stored) === normalizeToken(target)
-  ) {
-    return normalizeExpiry(
-      storageShield.getTokenExp<number>(),
-    )
-  }
-
-  return null
-}
-
-/**
- * 判斷 JWT 是否即將到期。
- *
- * 無法確認期限時採保守策略：
- * 要求重新取得 JWT。
+ * Unknown expiration:
+ * We first try the existing browser Cookie.
  */
 function isExpiring(
-  token?: string | null,
   bufferSeconds = REFRESH_BUFFER_SECONDS,
 ): boolean {
-  const target = token ?? getToken()
 
-  if (!target) return true
-
-  const exp = getExpirationTime(target)
-
-  if (exp === null) return true
+  if (sessionExpiresAt === null) {
+    return false
+  }
 
   const now = Math.floor(Date.now() / 1000)
 
-  return exp <= now + bufferSeconds
+  return sessionExpiresAt <= now + bufferSeconds
 }
 
 /**
- * 辨識目前 JWT 是否為 Guest。
+ * Existing FCM verification process:
  *
- * 延續原本 role=4 的定義。
+ * Turnstile
+ *     ↓
+ * Device Registration
+ *     ↓
+ * FCM Challenge
+ *     ↓
+ * Device Verification
+ *     ↓
+ * Verified FCM Token
+ *     ↓
+ * POST /auth/wToken
  */
-function isGuestToken(
-  token?: string | null,
-): boolean {
-  const target = token ?? getToken()
-
-  if (!target) return false
-
-  const payload = readJwtPayload(target)
-
-  const role =
-    payload?.role ??
-    payload?.roles?.[0]
-
-  return String(role) === '4'
-}
-
-/**
- * Guest JWT 實際核發流程：
- *
- * ensureFcmVerified()
- *       ↓
- * /device/register
- *       ↓
- * DEVICE_VERIFY
- *       ↓
- * /device/verify
- *       ↓
- * 已驗證的 FCM Token
- *       ↓
- * POST /auth/tempToken
- *       ↓
- * 新 Guest JWT
- *
- * FCM 驗證流程沿用現有實作。
- */
-async function requestGuestToken():
-  Promise<{
-    token: string
-    exp?: number | string
-  }> {
+async function requestWebToken(): Promise<number> {
 
   const verifiedFcmToken =
     await ensureFcmVerified()
 
   const response =
-    await bootstrapClient.post<TempTokenResponse>(
-      '/auth/tempToken',
+    await bootstrapClient.post<WebTokenResponse>(
+      '/auth/wToken',
       {
         token: verifiedFcmToken,
       },
     )
 
-  if (!response.data?.token) {
+  if (response.data?.authenticated !== true) {
+
     throw new Error(
-      '/auth/tempToken 未回傳 JWT',
+      '/auth/wToken authentication failed',
     )
   }
 
-  return {
-    token: response.data.token,
-    exp: response.data.exp,
+  const expiration =
+    normalizeExpiry(response.data.exp)
+
+  const now = Math.floor(Date.now() / 1000)
+
+  if (expiration <= now) {
+
+    throw new Error(
+      '/auth/wToken returned expired session',
+    )
   }
+
+  return expiration
 }
 
 /**
- * 強制重新取得 Guest JWT。
+ * Request and establish a fresh Cookie session.
  *
- * 無論本地 Token 是否過期，
- * 都會重新執行核發流程。
- *
- * 並發呼叫共用同一個 Promise。
+ * Only one request is executed concurrently
+ * within the current browser page.
  */
-async function refreshToken(): Promise<string> {
+async function refreshToken(): Promise<void> {
+
   if (refreshPromise) {
     return refreshPromise
   }
 
-  const generation = tokenGeneration
+  const task = (async () => {
 
-  const task = (async (): Promise<string> => {
-    const result = await requestGuestToken()
+    const expiration = await requestWebToken()
 
-    /*
-     * 更新期間若有其他登入／登出動作，
-     * 不允許舊結果覆寫目前 Token。
-     */
-    if (generation !== tokenGeneration) {
-      const current = getToken()
+    sessionExpiresAt = expiration
 
-      if (current && !isExpiring(current)) {
-        return current
-      }
+    sessionVersion++
 
-      throw new Error(
-        'JWT 狀態已改變，取消舊的更新結果',
-      )
-    }
-
-    /*
-     * 確認核發的新 Token 有效，
-     * 才寫入 localStorage。
-     */
-    const normalized = normalizeToken(result.token)
-
-    const exp =
-      normalizeExpiry(
-        readJwtPayload(normalized)?.exp,
-      ) ?? normalizeExpiry(result.exp)
-
-    if (
-      exp === null ||
-      exp <= Math.floor(Date.now() / 1000) +
-      REFRESH_BUFFER_SECONDS
-    ) {
-      throw new Error(
-        '新核發的 Guest JWT 缺少有效期限或即將過期',
-      )
-    }
-
-    setToken(normalized, result.exp)
-
-    const stored = getToken()
-
-    if (!stored) {
-      throw new Error(
-        'Guest JWT 儲存失敗',
-      )
-    }
-
-    return stored
   })()
 
   refreshPromise = task
 
   try {
-    return await task
+    await task
   } finally {
+
     if (refreshPromise === task) {
       refreshPromise = null
     }
@@ -393,98 +231,68 @@ async function refreshToken(): Promise<string> {
 }
 
 /**
- * 取得目前可用的 JWT。
+ * Ensure Cookie session is ready.
  *
- * Guest：
- * - 有效：直接使用
- * - 快到期：自動更新
+ * Fresh page:
+ * Do not immediately force FCM verification.
  *
- * 會員：
- * - 有效：直接使用
- * - 快到期：目前不擅自替換成 Guest
- *
- * 會員 Refresh Token 流程日後再整合。
+ * Let the browser send its existing Cookie.
  */
-async function getValidToken(): Promise<string> {
-  /*
-   * 若更新已經開始，
-   * 所有請求應等待同一個更新結果。
-   */
+async function ensureSession(): Promise<void> {
+
   if (refreshPromise) {
     return refreshPromise
   }
 
-  const current = getToken()
-
-  if (current && !isExpiring(current)) {
-    return current
+  if (isExpiring()) {
+    await refreshToken()
   }
-
-  if (current && !isGuestToken(current)) {
-    throw new Error(
-      '會員 JWT 已到期，目前尚未整合會員 Refresh Token',
-    )
-  }
-
-  return refreshToken()
 }
 
 /**
- * 清除目前 JWT 及有效期限。
- */
-function clearToken(): void {
-  tokenGeneration++
-
-  storageShield.removeAuthToken()
-  storageShield.removeTokenExp()
-}
-
-/**
- * 當後端明確拒絕某個 JWT 時，
- * 先檢查是否已有其他請求更新 Token。
+ * Called after receiving an HTTP 401.
  *
- * 如果 Token 已改變：
- * 直接重用最新 Token，不需要再更新一次。
+ * If another API already refreshed the session
+ * after this request started, do not refresh again.
  */
-async function recoverRejectedToken(
-  rejectedToken?: string | null,
-): Promise<string> {
+async function recoverUnauthorized(
+  rejectedSessionVersion?: number,
+): Promise<void> {
+
   if (refreshPromise) {
     return refreshPromise
   }
-
-  const current = getToken()
 
   if (
-    rejectedToken &&
-    current &&
-    normalizeToken(current) !==
-    normalizeToken(rejectedToken) &&
-    !isExpiring(current)
+    rejectedSessionVersion !== undefined &&
+    rejectedSessionVersion < sessionVersion
   ) {
-    return current
+    return
   }
 
-  if (current && !isGuestToken(current)) {
-    throw new Error(
-      '會員 JWT 被拒絕，目前尚未整合會員重新登入流程',
-    )
-  }
+  sessionExpiresAt = null
 
-  return refreshToken()
+  await refreshToken()
 }
 
 /**
- * 統一對外介面。
+ * Local metadata only.
+ *
+ * Cannot delete the HttpOnly Cookie.
  */
+function clearSessionMetadata(): void {
+
+  sessionExpiresAt = null
+
+  sessionVersion++
+}
+
 export const authTokenManager = {
-  getToken,
-  setToken,
-  getExpirationTime,
-  isExpiring,
-  isGuestToken,
-  getValidToken,
+  ensureSession,
   refreshToken,
-  recoverRejectedToken,
-  clearToken,
+  recoverUnauthorized,
+  getExpirationTime,
+  getSessionVersion,
+  isExpiring,
+  clearSessionMetadata,
 }
