@@ -2,6 +2,6 @@ export { default as TurnstileChallenge } from './components/TurnstileChallenge.v
 
 export { default as WebDeviceVerificationView } from './views/WebDeviceVerificationView.vue'
 
-export { registerWebDevice } from './services/webDeviceService'
+export { requestTurnstileToken, turnstileRequired } from './services/turnstileTokenService'
 
 export { loadTurnstile } from './services/turnstileLoader'

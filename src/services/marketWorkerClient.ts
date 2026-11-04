@@ -1,200 +1,57 @@
 import { authTokenManager } from '@/services/authTokenManager'
-
 import type { MarketEvent } from '@/types/market'
-
-import type {
-  PageToWorker,
-  WorkerToPage,
-  SharedMarketStatus,
-} from '@/services/marketWorkerProtocol'
+import type { PageToWorker, WorkerToPage, SharedMarketStatus } from '@/services/marketWorkerProtocol'
 
 export interface MarketWorkerHandle {
   disconnect: () => void
   retry: () => void
 }
 
-/**
- * ============================================================
- * BigStock SharedWorker Client
- * ============================================================
- *
- * Each browser tab communicates with one SharedWorker.
- *
- * JWT is never transferred through MessagePort.
- */
-
 export function connectMarketWorker(
   onData: (event: MarketEvent) => void,
   onStatus: (status: SharedMarketStatus) => void,
 ): MarketWorkerHandle {
-
-  const worker = new SharedWorker(
-    new URL(
-      '../workers/market.shared-worker.ts',
-      import.meta.url,
-    ),
-    {
-      type: 'module',
-
-      // Prevent mixing the old JWT protocol with
-      // the new Cookie session protocol.
-      name: 'bigstock-market-shared-v2',
-    },
-  )
-
+  const worker = new SharedWorker(new URL('../workers/market.shared-worker.ts', import.meta.url), {
+    type: 'module',
+    name: 'bigstock-market-turnstile-v3',
+  })
   const port = worker.port
-
   let closed = false
+  const outstanding = new Set<number>()
+  const send = (message: PageToWorker): void => { if (!closed) port.postMessage(message) }
 
-  const sessionRequests = new Set<number>()
-
-  function send(message: PageToWorker): void {
-    if (!closed) {
-      port.postMessage(message)
-    }
-  }
-
-  /**
-   * Messages from SharedWorker.
-   */
   port.onmessage = event => {
-
     if (closed) return
-
     const message = event.data as WorkerToPage
-
-    // ========================================================
-    // 1. Market Event
-    // ========================================================
-
-    if (message.type === 'MARKET_EVENT') {
-
-      onData(message.event)
-
-      return
-    }
-
-    // ========================================================
-    // 2. Socket Status
-    // ========================================================
-
-    if (message.type === 'STATUS') {
-
-      onStatus(message.status)
-
-      return
-    }
-
-    // ========================================================
-    // 3. Prepare Cookie Session
-    // ========================================================
-
-    if (message.type === 'SESSION_REQUEST') {
-
-      const requestId = message.requestId
-
-      sessionRequests.add(requestId)
-
+    if (message.type === 'MARKET_EVENT') onData(message.event)
+    else if (message.type === 'STATUS') onStatus(message.status)
+    else if (message.type === 'SESSION_REQUEST') {
+      outstanding.add(message.requestId)
       void (async () => {
-
+        let error: string | undefined
         try {
-
-          if (message.forceRefresh) {
-
-            /**
-             * WebSocket authentication was rejected.
-             *
-             * Re-run original FCM verification.
-             */
-            await authTokenManager.refreshToken()
-
-          } else {
-
-            /**
-             * Existing Cookie may still be valid.
-             */
-            await authTokenManager.ensureSession()
-          }
-
-          if (
-            !closed &&
-            sessionRequests.has(requestId)
-          ) {
-
-            send({
-              type: 'SESSION_RESPONSE',
-              requestId,
-            })
-          }
-
-        } catch (error: unknown) {
-
-          if (
-            !closed &&
-            sessionRequests.has(requestId)
-          ) {
-
-            send({
-              type: 'SESSION_RESPONSE',
-              requestId,
-
-              error:
-                error instanceof Error
-                  ? error.message
-                  : String(error),
-            })
-          }
-
-        } finally {
-
-          sessionRequests.delete(requestId)
+          if (message.forceRefresh) await authTokenManager.refreshToken()
+          else await authTokenManager.ensureSession()
+        } catch (e) { error = e instanceof Error ? e.message : String(e) }
+        if (!closed && outstanding.has(message.requestId)) {
+          send({ type: 'SESSION_RESPONSE', requestId: message.requestId, error })
         }
+        outstanding.delete(message.requestId)
       })()
     }
   }
-
   port.start()
-
-  send({
-    type: 'HELLO',
-  })
-
-  /**
-   * Keep the SharedWorker port alive.
-   */
-  const heartbeat = setInterval(() => {
-
-    send({
-      type: 'PING',
-    })
-
-  }, 20_000)
-
+  send({ type: 'HELLO' })
+  const heartbeat = setInterval(() => send({ type: 'PING' }), 20_000)
   return {
-
-    retry(): void {
-
-      send({
-        type: 'RETRY',
-      })
-    },
-
-    disconnect(): void {
-
+    retry: () => send({ type: 'RETRY' }),
+    disconnect: () => {
       if (closed) return
-
-      send({
-        type: 'LEAVE',
-      })
-
+      send({ type: 'LEAVE' })
       closed = true
-
       clearInterval(heartbeat)
-
-      sessionRequests.clear()
-
+      outstanding.clear()
       port.onmessage = null
-
       port.close()
     },
   }

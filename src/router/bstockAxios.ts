@@ -1,201 +1,57 @@
-import axios, {
-  AxiosHeaders,
-  type InternalAxiosRequestConfig,
-} from 'axios'
-
+import axios, { AxiosHeaders, type InternalAxiosRequestConfig } from 'axios'
 import { authTokenManager } from '@/services/authTokenManager'
+import { httpClientConfig } from '@/services/httpClientConfig'
 
-/**
- * ============================================================
- * BigStock Axios Client
- * ============================================================
- *
- * Authentication:
- * HttpOnly Cookie
- *
- * Backend:
- * /auth/wToken
- */
-
-interface BigStockRequestConfig
-  extends InternalAxiosRequestConfig {
-
-  _retry?: boolean
-
-  _sessionVersion?: number
-
-  skipAuthRefresh?: boolean
+declare module 'axios' {
+  export interface AxiosRequestConfig {
+    skipAuthRefresh?: boolean
+  }
 }
 
-/**
- * Main API Client.
- */
-const apiClient = axios.create({
+interface InternalBigStockConfig extends InternalAxiosRequestConfig {
+  _retry?: boolean
+  _sessionGeneration?: number
+}
 
-  baseURL: '/api',
+const apiClient = axios.create(httpClientConfig)
+const bootstrapPaths = new Set([
+  '/auth/csrf', '/auth/wToken', '/auth/tempToken',
+  '/device/register', '/device/verify',
+])
+function isBootstrap(url?: string): boolean {
+  if (!url) return false
+  const path = url.split('?')[0].replace(/^\/api(?=\/)/, '')
+  return bootstrapPaths.has(path)
+}
 
-  timeout: 30000,
-
-  withCredentials: true,
-
-  xsrfCookieName: 'XSRF-TOKEN',
-
-  xsrfHeaderName: 'X-XSRF-TOKEN',
-
-  withXSRFToken: true,
-
-  headers: {
-    'Content-Type': 'application/json',
-  },
+apiClient.interceptors.request.use(async (request) => {
+  const config = request as InternalBigStockConfig
+  const headers = AxiosHeaders.from(config.headers)
+  headers.delete('Authorization')
+  config.headers = headers
+  if (config.skipAuthRefresh || isBootstrap(config.url)) return config
+  await authTokenManager.ensureSession()
+  config._sessionGeneration = authTokenManager.getSessionVersion()
+  return config
 })
 
-/**
- * Bootstrap endpoints must not trigger
- * authentication recursively.
- */
-function isAuthBootstrapRequest(
-  url?: string,
-): boolean {
-
-  if (!url) return false
-
-  const path = url.split('?')[0]
-
-  const bootstrapPaths = [
-    '/auth/wToken',
-    '/auth/tempToken',
-    '/device/register',
-    '/device/web/register',
-    '/device/verify',
-  ]
-
-  return bootstrapPaths.some(
-    endpoint =>
-      path === endpoint ||
-      path === `/api${endpoint}`,
-  )
-}
-
-/**
- * ============================================================
- * Request Interceptor
- * ============================================================
- */
-apiClient.interceptors.request.use(
-
-  async (
-    config: InternalAxiosRequestConfig,
-  ): Promise<InternalAxiosRequestConfig> => {
-
-    const request =
-      config as BigStockRequestConfig
-
-    /**
-     * Remove any legacy JWT Authorization header.
-     *
-     * Web must use Cookie authentication.
-     */
-    const headers = AxiosHeaders.from(request.headers)
-
-    headers.delete('Authorization')
-
-    request.headers = headers
-
-    /**
-     * Authentication bootstrap endpoints.
-     */
-    if (
-      request.skipAuthRefresh ||
-      isAuthBootstrapRequest(request.url)
-    ) {
-      return request
-    }
-
-    /**
-     * Ensure current Cookie session is ready.
-     */
-    await authTokenManager.ensureSession()
-
-    /**
-     * Remember the session version associated
-     * with this particular request.
-     */
-    request._sessionVersion =
-      authTokenManager.getSessionVersion()
-
-    return request
-  },
-
-  error => Promise.reject(error),
-)
-
-/**
- * ============================================================
- * Response Interceptor
- * ============================================================
- */
 apiClient.interceptors.response.use(
-
   response => response,
-
   async error => {
-
-    if (!axios.isAxiosError(error)) {
+    if (!axios.isAxiosError(error)) return Promise.reject(error)
+    const config = error.config as InternalBigStockConfig | undefined
+    if (!config || config.skipAuthRefresh || isBootstrap(config.url) ||
+        error.response?.status !== 401 || config._retry) {
       return Promise.reject(error)
     }
-
-    const originalRequest =
-      error.config as BigStockRequestConfig | undefined
-
-    if (!originalRequest) {
-      return Promise.reject(error)
-    }
-
-    /**
-     * Do not refresh on bootstrap endpoints.
-     */
-    if (
-      originalRequest.skipAuthRefresh ||
-      isAuthBootstrapRequest(originalRequest.url)
-    ) {
-      return Promise.reject(error)
-    }
-
-    /**
-     * Only retry once after HTTP 401.
-     */
-    if (
-      error.response?.status !== 401 ||
-      originalRequest._retry
-    ) {
-      return Promise.reject(error)
-    }
-
-    originalRequest._retry = true
-
+    config._retry = true
     try {
-
-      await authTokenManager.recoverUnauthorized(
-        originalRequest._sessionVersion,
-      )
-
-      /**
-       * Cookie was refreshed by /auth/wToken.
-       *
-       * Axios automatically sends the new Cookie.
-       */
-      return apiClient(originalRequest)
-
-    } catch (refreshError: unknown) {
-
-      console.error(
-        '[AUTH] Cookie session recovery failed',
-        refreshError,
-      )
-
-      return Promise.reject(refreshError)
+      await authTokenManager.recoverUnauthorized(config._sessionGeneration)
+      // Axios sends refreshed HttpOnly Cookie automatically.
+      return apiClient(config)
+    } catch (recoveryError) {
+      return Promise.reject(recoveryError)
     }
   },
 )
-
 export default apiClient

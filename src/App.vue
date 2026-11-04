@@ -20,10 +20,10 @@
     <!-- ==================================================
          Cloudflare Turnstile Verification
 
-         Controlled by fcmStartup.ts.
+         Controlled by turnstileTokenService.ts.
 
          Only displayed when the current browser
-         needs Web device verification.
+         needs to establish a Web Guest Session.
          ================================================== -->
     <WebDeviceVerificationView v-if="turnstileRequired" />
   </div>
@@ -40,7 +40,7 @@
 
   import WebDeviceVerificationView from '@/security/views/WebDeviceVerificationView.vue'
 
-  import { turnstileRequired } from '@/firebase/fcmStartup'
+  import { turnstileRequired } from '@/security/services/turnstileTokenService'
 
   import { useMarketStore } from '@/stores/marketStore'
 
@@ -58,7 +58,7 @@
     /*
      * Keep your existing socket initialization.
      *
-     * JWT / FCM verification should still be
+     * Web session verification should be
      * enforced inside your existing socket
      * authorization flow.
      */
