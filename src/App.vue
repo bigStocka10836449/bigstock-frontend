@@ -1,72 +1,30 @@
 <template>
   <div id="app" class="app-container">
-    <!-- ==================================================
-         Global Header
-         ================================================== -->
     <Header />
-
-    <!-- ==================================================
-         Main Content
-         ================================================== -->
-    <main class="app-content">
-      <RouterView />
-    </main>
-
-    <!-- ==================================================
-         Firebase Notification Permission
-         ================================================== -->
-    <NotificationPermissionModal />
-
-    <!-- ==================================================
-         Cloudflare Turnstile Verification
-
-         Controlled by turnstileTokenService.ts.
-
-         Only displayed when the current browser
-         needs to establish a Web Guest Session.
-         ================================================== -->
+    <main class="app-content"><RouterView /></main>
     <WebDeviceVerificationView v-if="turnstileRequired" />
   </div>
 </template>
 
 <script setup lang="ts">
   import { onMounted, onBeforeUnmount } from 'vue'
-
   import { RouterView } from 'vue-router'
-
   import Header from '@/views/Header.vue'
-
-  import NotificationPermissionModal from '@/components/notification/NotificationPermissionModal.vue'
-
   import WebDeviceVerificationView from '@/security/views/WebDeviceVerificationView.vue'
-
   import { turnstileRequired } from '@/security/services/turnstileTokenService'
-
   import { useMarketStore } from '@/stores/marketStore'
-
-  // ============================================================
-  // Market Store
-  // ============================================================
+  import { useNewsStore } from '@/stores/newsStore'
 
   const marketStore = useMarketStore()
-
-  // ============================================================
-  // Lifecycle
-  // ============================================================
+  const newsStore = useNewsStore()
 
   onMounted(() => {
-    /*
-     * Keep your existing socket initialization.
-     *
-     * Web session verification should be
-     * enforced inside your existing socket
-     * authorization flow.
-     */
     marketStore.mountSocket()
+    newsStore.startPolling()
   })
-
   onBeforeUnmount(() => {
     void marketStore.unmountSocket()
+    newsStore.stopPolling()
   })
 </script>
 
@@ -74,7 +32,6 @@
   :root {
     --bigstock-header-height: 110px;
   }
-
   html,
   body {
     margin: 0;
@@ -83,20 +40,17 @@
     min-height: 100%;
     overflow-x: clip;
   }
-
   *,
   *::before,
   *::after {
     box-sizing: border-box;
   }
-
   #app {
     display: flex;
     flex-direction: column;
     width: 100%;
     min-height: 100dvh;
   }
-
   .app-content {
     flex: 1;
     width: 100%;

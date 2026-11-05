@@ -17,9 +17,9 @@ export const MARKETS = [
   { symbol: 'WTX00', label: '台指期現貨', region: '台灣' },
   { symbol: 'WTX&', label: '台指期', region: '台灣' },
   { symbol: '^SOX', label: '費城半導體', region: '美國' },
-  { symbol: 'MES=F', label: '微型標普 500 期貨', region: '美國' },
-  { symbol: 'MYM=F', label: '微型道瓊期貨', region: '美國' },
-  { symbol: 'MNQ=F', label: '微型那斯達克 100 期貨', region: '美國' },
+  { symbol: 'MES=F', label: '小標普 500 期貨', region: '美國' },
+  { symbol: 'MYM=F', label: '小道瓊期貨', region: '美國' },
+  { symbol: 'MNQ=F', label: '小那斯達克 100 期貨', region: '美國' },
 ] as const
 export type MarketSymbol = (typeof MARKETS)[number]['symbol']
 export type MarketSocketStatus = SharedMarketStatus

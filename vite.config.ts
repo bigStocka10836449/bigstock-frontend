@@ -1,9 +1,7 @@
 import { fileURLToPath, URL } from 'node:url'
-import { resolve } from 'node:path'
 
-import { build as viteBuild, defineConfig, loadEnv, type Plugin, type UserConfig } from 'vite'
+import { defineConfig, loadEnv, type Plugin, type UserConfig } from 'vite'
 
-import { build as esbuild } from 'esbuild'
 
 import vue from '@vitejs/plugin-vue'
 import vueDevTools from 'vite-plugin-vue-devtools'
@@ -30,153 +28,6 @@ const bigstockTerserOptions: ViteTerserOptions = {
 }
 
 /**
- * ============================================================
- * Firebase Messaging Service Worker Plugin
- * ============================================================
- *
- * Development:
- *
- * src/firebase/firebase-messaging-sw.ts
- *         ↓ esbuild
- * /firebase-messaging-sw.js
- *
- * Production:
- *
- * src/firebase/firebase-messaging-sw.ts
- *         ↓ Vite Build
- * dist/firebase-messaging-sw.js
- *
- * 保留：
- * - TypeScript Service Worker
- * - Firebase SDK Imports
- * - runtime-config.json loaded at service worker startup
- * - 單獨的 Service Worker Bundle
- */
-function firebaseMessagingServiceWorkerPlugin(mode: string): Plugin {
-  let isBuild = false
-  const serviceWorkerEntry = resolve(process.cwd(), 'src/firebase/firebase-messaging-sw.ts')
-
-  return {
-    name: 'firebase-messaging-service-worker',
-    configResolved(config) {
-      isBuild = config.command === 'build'
-    },
-
-    /**
-     * --------------------------------------------------------
-     * Development
-     * --------------------------------------------------------
-     *
-     * 動態處理：
-     * /firebase-messaging-sw.js
-     */
-    configureServer(server) {
-      server.middlewares.use(
-        '/firebase-messaging-sw.js',
-
-        async (_req, res, next) => {
-          try {
-            const result = await esbuild({
-              entryPoints: [serviceWorkerEntry],
-
-              write: false,
-
-              bundle: true,
-
-              platform: 'browser',
-
-              format: 'iife',
-
-              target: 'es2020',
-
-              define: {
-                global: 'globalThis',
-              },
-
-              sourcemap: 'inline',
-            })
-
-            const outputFile = result.outputFiles?.[0]
-
-            if (!outputFile) {
-              throw new Error('Firebase Service Worker build produced no output.')
-            }
-
-            res.statusCode = 200
-
-            res.setHeader('Content-Type', 'application/javascript; charset=utf-8')
-
-            res.setHeader('Service-Worker-Allowed', '/')
-
-            res.setHeader('Cache-Control', 'no-store')
-
-            res.end(outputFile.contents)
-          } catch (error) {
-            console.error('[FCM] Service Worker build failed:', error)
-
-            next(error)
-          }
-        },
-      )
-    },
-
-    /**
-     * --------------------------------------------------------
-     * Production
-     * --------------------------------------------------------
-     *
-     * Vue 主程式 Build 完成後，
-     * 再將 Firebase Messaging Service Worker
-     * 打包至 dist 根目錄。
-     */
-    async closeBundle() {
-      if (!isBuild) return
-      await viteBuild({
-        configFile: false,
-
-        mode,
-
-        publicDir: false,
-
-        /**
-         * 此設定是獨立的第二次 Vite Build。
-         *
-         * 不會自動繼承外層 Vite define。
-         */
-        define: {
-          global: 'globalThis',
-        },
-
-        build: {
-          emptyOutDir: false,
-
-          outDir: resolve(process.cwd(), 'dist'),
-
-          target: 'es2020',
-          sourcemap: false,
-          minify: 'terser',
-          terserOptions: bigstockTerserOptions,
-
-          lib: {
-            entry: serviceWorkerEntry,
-
-            formats: ['es'],
-
-            fileName: () => 'firebase-messaging-sw.js',
-          },
-
-          rollupOptions: {
-            output: {
-              inlineDynamicImports: true,
-            },
-          },
-        },
-      })
-    },
-  }
-}
-
-/**
  * Development Runtime Configuration.
  *
  * Read .env.local through Vite's loadEnv().
@@ -190,28 +41,6 @@ function developmentRuntimeConfigPlugin(
   const config = {
     APP_BASE_URL: env.VITE_APP_BASE_URL || '',
     WEB_API_BASE_URL: '/api',
-
-    FIREBASE_API_KEY:
-      env.VITE_FIREBASE_API_KEY || '',
-
-    FIREBASE_AUTH_DOMAIN:
-      env.VITE_FIREBASE_AUTH_DOMAIN || '',
-
-    FIREBASE_PROJECT_ID:
-      env.VITE_FIREBASE_PROJECT_ID || '',
-
-    FIREBASE_STORAGE_BUCKET:
-      env.VITE_FIREBASE_STORAGE_BUCKET || '',
-
-    FIREBASE_MESSAGING_SENDER_ID:
-      env.VITE_FIREBASE_MESSAGING_SENDER_ID || '',
-
-    FIREBASE_APP_ID:
-      env.VITE_FIREBASE_APP_ID || '',
-
-    FIREBASE_VAPID_KEY:
-      env.VITE_FIREBASE_VAPID_KEY || '',
-
     TURNSTILE_SITE_KEY:
       env.VITE_TURNSTILE_SITE_KEY || '',
   }
@@ -308,7 +137,6 @@ export default defineConfig(({ mode, command }) => {
 
       ...(productionBuild ? [] : [vueDevTools()]),
 
-      firebaseMessagingServiceWorkerPlugin(mode),
 
       chartObfuscationPlugin({
         enabled: enableChartObfuscation,
@@ -430,7 +258,7 @@ export default defineConfig(({ mode, command }) => {
       minify: productionBuild ? 'terser' : false,
       terserOptions: bigstockTerserOptions,
 
-      // 僅主程式使用匿名化檔名；FCM Service Worker 維持固定 URL。
+      // 主程式使用匿名化檔名。
       rollupOptions: {
         output: {
           // 所有入口 JS、動態 Chunk、CSS、圖片皆使用 hash 命名。

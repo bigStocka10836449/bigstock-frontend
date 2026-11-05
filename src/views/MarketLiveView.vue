@@ -107,9 +107,7 @@
       <section class="detail-section live-detail" aria-label="WebSocket 即時行情">
         <div class="section-heading">
           <div>
-            <div class="section-eyebrow">REAL-TIME · STOMP</div>
-
-            <h3>WebSocket 即時行情</h3>
+            <h3>即時行情</h3>
           </div>
 
           <span class="session-indicator" :class="hasLiveData ? 'is-open' : 'is-closed'">
@@ -141,7 +139,7 @@
 
         <!-- 元件本身會處理沒有點位時的等待畫面。 -->
 
-        <MarketRealtimeChart :points="currentLiveSeries" />
+        <MarketRealtimeChart :points="currentLiveSeries" :timezone="defaultTimezone" />
 
         <p v-if="socketStatus !== 'connected'" class="live-note">
           WebSocket {{ connectionText }}；已收到的圖表資料暫時保留。
@@ -163,16 +161,16 @@
 
         <span>上方：完整歷史日 K / 成交量</span>
 
-        <span>下方：WebSocket 有效價格變動走勢</span>
+        <span>下方： 有效價格變動走勢</span>
 
         <span>未收到資料 ≠ 確認休市</span>
       </div>
     </div>
 
     <p class="disclaimer">
-      歷史日 K 與 WebSocket 即時數值來自不同更新機制，可能存在時間差。
+      歷史日 K 與 即時數值來自不同更新機制，可能存在時間差。
       下方即時圖只記錄目前前端連線期間收到的有效價格變動；相同價格的重複推播不會額外畫點。
-      沒有推播可能是休市、網路中斷或行情來源暫停，不能直接判定尚未開盤。
+      沒有更新可能是休市、網路中斷或行情來源暫停，不能直接判定尚未開盤。
       部分市場為期貨商品，不等同現貨指數。
     </p>
   </section>

@@ -117,10 +117,6 @@
     // 保留既有新聞初始化流程。
     // newsStore 已有單例與請求去重機制。
     void newsStore.loadNews(100)
-
-    // 保留既有 FCM Listener。
-    // StockChangeRanking 不會另外註冊 FCM Listener。
-    void newsStore.startFcmListener()
   })
 </script>
 

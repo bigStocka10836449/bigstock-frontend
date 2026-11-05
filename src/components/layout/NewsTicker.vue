@@ -1,11 +1,7 @@
 <template>
   <div class="news-ticker">
-    <!-- 左側為即時狀態標籤；只代表新聞推播功能，不代表 FCM 一定已連線。 -->
     <div class="ticker-label"><span class="live-dot" />即時快訊</div>
-
-    <!-- 新聞內容區固定高度，避免新聞切換時推動整個頁面。 -->
     <div class="ticker-viewport">
-      <!-- 只有最新新聞 ID 變更才執行向下滑動動畫；不做定時輪播。 -->
       <Transition :name="ready ? 'news-slide' : ''">
         <RouterLink
           :key="currentNews?.id ?? 'empty'"
@@ -27,36 +23,29 @@
         </RouterLink>
       </Transition>
     </div>
-
-    <!-- 完整新聞清單顯示更多歷史新聞。 -->
     <RouterLink class="more-news" to="/news">查看更多 →</RouterLink>
   </div>
 </template>
-
 <script setup lang="ts">
-  import { computed, nextTick, onMounted, ref } from 'vue'
+  import { computed, nextTick, ref, watch } from 'vue'
   import { useNewsStore } from '@/stores/newsStore'
-
   const newsStore = useNewsStore()
   const currentNews = computed(() => newsStore.latestNews)
-
-  // 首次讀取歷史資料時不播放動畫，避免空狀態滑動。
   const ready = ref(false)
-
   function formatTime(time: string): string {
-    // 後端新聞格式：yyyy-MM-dd HH:mm:ss；沒有資料就顯示空字串。
     return time.length >= 16 ? time.slice(11, 16) : time
   }
-
-  onMounted(async () => {
-    // 優先註冊 FCM 監聽；若初始化失敗仍可顯示 REST 歷史新聞。
-    void newsStore.startFcmListener()
-    await newsStore.loadNews(100)
-    await nextTick()
-    ready.value = true
-  })
+  watch(
+    () => newsStore.initialized,
+    async (value) => {
+      if (value && !ready.value) {
+        await nextTick()
+        ready.value = true
+      }
+    },
+    { immediate: true },
+  )
 </script>
-
 <style scoped>
   .news-ticker {
     display: flex;
@@ -134,7 +123,6 @@
   .more-news:hover {
     color: white;
   }
-  /* 新新聞從上方進入，舊新聞向下滑出；只在新聞變動時觸發。 */
   .news-slide-enter-active,
   .news-slide-leave-active {
     transition:
