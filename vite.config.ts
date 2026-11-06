@@ -4,7 +4,6 @@ import { defineConfig, loadEnv, type Plugin, type UserConfig } from 'vite'
 
 
 import vue from '@vitejs/plugin-vue'
-import vueDevTools from 'vite-plugin-vue-devtools'
 import { chartObfuscationPlugin } from './build/chartObfuscationPlugin'
 
 
@@ -134,8 +133,6 @@ export default defineConfig(({ mode, command }) => {
       ...(command === 'serve'
         ? [developmentRuntimeConfigPlugin(env)]
         : []),
-
-      ...(productionBuild ? [] : [vueDevTools()]),
 
 
       chartObfuscationPlugin({

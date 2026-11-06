@@ -2,7 +2,10 @@
   <header class="site-header">
     <div class="header-main">
       <!-- 首頁入口；移除畫面上的會員登入／登出，但不修改 FCM Guest JWT 驗證。 -->
-      <RouterLink to="/" class="brand">BigStock</RouterLink>
+      <router-link to="/" class="brand" aria-label="BigStock 首頁">
+        <img src="/favicon-32.png" alt="" class="brand-icon" />
+        <span class="brand-name">BStock</span>
+      </router-link>
 
       <!-- 全站路由選單，手機可左右捲動。 -->
       <nav class="nav-menu" aria-label="網站主要導覽">

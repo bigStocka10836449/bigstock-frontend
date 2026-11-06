@@ -1,37 +1,9 @@
 <template>
   <main class="home-page">
     <!-- ======================================================
-         1. 首頁介紹
-         ====================================================== -->
-    <section class="intro">
-      <h1>BigStock 股票資訊平台</h1>
-      <p>掌握股市資訊、技術走勢、產業分類與最新財經快訊。</p>
-    </section>
-
-    <!-- ======================================================
          2. 最新財經快訊
          保留原本 newsStore，不新增 FCM Listener
          ====================================================== -->
-    <section class="section">
-      <div class="section-heading">
-        <h2>最新財經快訊</h2>
-        <RouterLink to="/news">查看更多 →</RouterLink>
-      </div>
-
-      <RouterLink to="/news" class="latest-news">
-        <template v-if="newsStore.latestNews">
-          <time>{{ newsStore.latestNews.time }}</time>
-
-          <p>
-            {{ newsStore.latestNews.title || newsStore.latestNews.content }}
-          </p>
-        </template>
-
-        <span v-else>
-          {{ newsStore.loading ? '新聞載入中...' : '目前沒有新聞資料' }}
-        </span>
-      </RouterLink>
-    </section>
 
     <!-- ======================================================
          3. 個股漲跌幅排行榜
@@ -305,6 +277,51 @@
 
     .section-heading a {
       font-size: 12px;
+    }
+  }
+  .intro-heading {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .intro-logo {
+    width: 42px;
+    height: 42px;
+    object-fit: contain;
+    flex-shrink: 0;
+  }
+
+  .intro-heading h1 {
+    margin: 0;
+    font-size: 30px;
+    font-weight: 700;
+    line-height: 1.3;
+    color: #ffffff;
+  }
+
+  .intro-heading h1 span {
+    font-weight: 500;
+  }
+
+  .intro p {
+    margin-top: 12px;
+    color: #aab4c3;
+    line-height: 1.6;
+  }
+
+  @media (max-width: 600px) {
+    .intro-heading {
+      gap: 8px;
+    }
+
+    .intro-logo {
+      width: 32px;
+      height: 32px;
+    }
+
+    .intro-heading h1 {
+      font-size: 23px;
     }
   }
 </style>
