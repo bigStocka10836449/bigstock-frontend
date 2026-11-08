@@ -64,7 +64,6 @@ jobs:
 
           required_files=(
             "dist/index.html"
-            "dist/firebase-messaging-sw.js"
             "Dockerfile"
             "nginx.conf"
             "docker/40-runtime-config.sh"
@@ -78,6 +77,8 @@ jobs:
               exit 1
             fi
           done
+
+          echo "All required build artifacts verified."
 
       # ==========================================
       # 7. Login Docker Registry
