@@ -9,124 +9,139 @@
 </template>
 
 <script setup lang="ts">
-  import { ref, onMounted, onUnmounted } from 'vue'
-  import { loadTurnstile } from '../services/turnstileLoader'
+import { ref, onMounted, onUnmounted } from 'vue'
+import { loadTurnstile } from '../services/turnstileLoader'
+import { getRuntimeConfig } from '@/config/runtimeConfig'
 
-  const props = withDefaults(
-    defineProps<{
-      action?: string
-      theme?: 'auto' | 'light' | 'dark'
-    }>(),
-    {
-      action: 'fcm_challenge',
-      theme: 'auto',
-    },
-  )
+const props = withDefaults(
+  defineProps<{
+    action?: string
+    theme?: 'auto' | 'light' | 'dark'
+  }>(),
+  {
+    action: 'fcm_challenge',
+    theme: 'auto',
+  },
+)
 
-  const emit = defineEmits<{
-    verified: [token: string]
-    expired: []
-    error: [message: string]
-  }>()
+const emit = defineEmits<{
+  verified: [token: string]
+  expired: []
+  error: [message: string]
+}>()
 
-  const container = ref<HTMLElement | null>(null)
-  const errorMessage = ref('')
+const container = ref<HTMLElement | null>(null)
+const errorMessage = ref('')
 
-  const siteKey = import.meta.env.VITE_TURNSTILE_SITE_KEY
+let widgetId: string | null = null
+let destroyed = false
 
-  let widgetId: string | null = null
-  let destroyed = false
+async function initialize(): Promise<void> {
 
-  async function initialize(): Promise<void> {
-    if (!siteKey) {
-      reportError('TURNSTILE_SITE_KEY_MISSING')
+  // ==========================================
+  // 1. Load Runtime Configuration
+  // ==========================================
+
+  let siteKey = ''
+
+  try {
+    siteKey = getRuntimeConfig().TURNSTILE_SITE_KEY?.trim() ?? ''
+  } catch {
+    reportError('RUNTIME_CONFIG_MISSING')
+    return
+  }
+
+  if (!siteKey) {
+    reportError('TURNSTILE_SITE_KEY_MISSING')
+    return
+  }
+
+  // ==========================================
+  // 2. Initialize Turnstile SDK
+  // ==========================================
+
+  try {
+    const sdk = await loadTurnstile()
+
+    if (destroyed || !container.value) {
       return
     }
 
-    try {
-      const sdk = await loadTurnstile()
+    widgetId = sdk.render(container.value, {
+      sitekey: siteKey,
+      action: props.action,
+      theme: props.theme,
+      'response-field': false,
 
-      if (destroyed || !container.value) {
-        return
-      }
+      callback(token: string) {
+        if (destroyed) return
 
-      widgetId = sdk.render(container.value, {
-        sitekey: siteKey,
-        action: props.action,
-        theme: props.theme,
-        'response-field': false,
+        errorMessage.value = ''
+        emit('verified', token)
+      },
 
-        callback(token: string) {
-          if (destroyed) return
+      'expired-callback'() {
+        if (destroyed) return
+        emit('expired')
+      },
 
-          errorMessage.value = ''
-          emit('verified', token)
-        },
+      'error-callback'(code?: string) {
+        if (destroyed) return
 
-        'expired-callback'() {
-          if (destroyed) return
-          emit('expired')
-        },
+        reportError(`TURNSTILE_ERROR${code ? `_${code}` : ''}`)
+      },
 
-        'error-callback'(code?: string) {
-          if (destroyed) return
+      'timeout-callback'() {
+        if (destroyed) return
+        reportError('TURNSTILE_TIMEOUT')
+      },
+    })
 
-          reportError(`TURNSTILE_ERROR${code ? `_${code}` : ''}`)
-        },
-
-        'timeout-callback'() {
-          if (destroyed) return
-          reportError('TURNSTILE_TIMEOUT')
-        },
-      })
-    } catch {
-      if (!destroyed) {
-        reportError('TURNSTILE_LOAD_FAILED')
-      }
+  } catch {
+    if (!destroyed) {
+      reportError('TURNSTILE_LOAD_FAILED')
     }
   }
+}
 
-  function reportError(message: string): void {
-    errorMessage.value = message
-    emit('error', message)
+// ==========================================
+// Error Handling
+// ==========================================
+
+function reportError(message: string): void {
+  errorMessage.value = message
+  emit('error', message)
+}
+
+// ==========================================
+// Reset Turnstile
+// ==========================================
+
+function reset(): void {
+  if (widgetId === null || !window.turnstile) {
+    return
   }
 
-  function reset(): void {
-    if (widgetId === null || !window.turnstile) {
-      return
-    }
+  errorMessage.value = ''
+  window.turnstile.reset(widgetId)
+}
 
-    errorMessage.value = ''
-    window.turnstile.reset(widgetId)
+// ==========================================
+// Lifecycle
+// ==========================================
+
+onMounted(() => {
+  void initialize()
+})
+
+onUnmounted(() => {
+  destroyed = true
+
+  if (widgetId !== null) {
+    window.turnstile?.remove(widgetId)
+    widgetId = null
   }
+})
 
-  onMounted(() => {
-    void initialize()
-  })
-
-  onUnmounted(() => {
-    destroyed = true
-
-    if (widgetId !== null) {
-      window.turnstile?.remove(widgetId)
-      widgetId = null
-    }
-  })
-
-  defineExpose({ reset })
+defineExpose({ reset })
 </script>
-
-<style scoped>
-  .turnstile-wrapper {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 8px;
-  }
-
-  .error-message {
-    color: #dc2626;
-    font-size: 13px;
-    text-align: center;
-  }
-</style>
