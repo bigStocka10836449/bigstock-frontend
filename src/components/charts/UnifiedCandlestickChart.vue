@@ -56,7 +56,7 @@
       ref="chartEl"
       class="chart"
       role="img"
-      aria-label="歷史日 K、MA 均線、成交量、MA 扣抵與 KD 指標圖"
+      aria-label="歷史 K 線、MA 均線、成交量、MA 扣抵與 KD 指標圖"
     ></div>
   </section>
 </template>
@@ -113,6 +113,7 @@
   let mounted = false
   let previousContext = ''
 
+  const isMinutePeriod = computed(() => props.periodLabel.includes('分 K'))
   const dateFormat = computed(() => {
     try {
       return new Intl.DateTimeFormat('en-CA', {
@@ -120,6 +121,9 @@
         year: 'numeric',
         month: '2-digit',
         day: '2-digit',
+        ...(isMinutePeriod.value
+          ? { hour: '2-digit' as const, minute: '2-digit' as const, hourCycle: 'h23' as const }
+          : {}),
       })
     } catch {
       return new Intl.DateTimeFormat('en-CA', {
@@ -127,6 +131,9 @@
         year: 'numeric',
         month: '2-digit',
         day: '2-digit',
+        ...(isMinutePeriod.value
+          ? { hour: '2-digit' as const, minute: '2-digit' as const, hourCycle: 'h23' as const }
+          : {}),
       })
     }
   })

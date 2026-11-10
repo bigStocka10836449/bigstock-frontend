@@ -51,3 +51,17 @@ export async function getStockCodeByFilter(
 
   return response.data
 }
+
+/** 取得個股 5 分 K / 60 分 K；沿用既有 Axios 認證與 Gateway。 */
+export type IntradayPeriod = '5m' | '60m'
+
+export async function getSingleStockIntradayPrice(
+  stockCode: string,
+  period: IntradayPeriod,
+): Promise<import('@/types/stockPrice').StockIntradayPrice[]> {
+  const response = await apiClient.post<import('@/types/stockPrice').StockIntradayPrice[]>(
+    '/gateway/SingleStockIntradayPrice',
+    { stockCode, period },
+  )
+  return response.data
+}

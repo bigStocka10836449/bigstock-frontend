@@ -59,3 +59,23 @@ export interface ChartBar {
   lineKvalue: number | null
   lineDvalue: number | null
 }
+
+/** Spring Boot StockIntradayPrice 的盤中 K 線 JSON。 */
+export interface StockIntradayPrice {
+  stockCode: string
+  period: '5m' | '60m'
+  // JavaTimeModule 預設可能序列化為 [yyyy, M, d, HH, mm, ss]。
+  tradingTime: string | number[]
+  openingPrice: string | number | null
+  closingPrice: string | number | null
+  highPrice: string | number | null
+  lowPrice: string | number | null
+  tradingVolume: string | number | null
+  fiveMa?: number | null
+  tenMa?: number | null
+  twentyMa?: number | null
+  sixtyMa?: number | null
+  lineKValue?: number | null
+  lineDValue?: number | null
+  lineRsvValue?: number | null
+}
