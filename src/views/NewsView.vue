@@ -16,8 +16,7 @@
         type="button"
         :class="{ active: selectedSource === source }"
         @click="selectedSource = source"
-      >
-      </button>
+      ></button>
     </div>
     <p v-if="newsStore.loading && newsStore.news.length === 0" class="status">正在載入新聞...</p>
     <p v-else-if="newsStore.errorMessage && newsStore.news.length === 0" class="status">

@@ -41,7 +41,7 @@ apiClient.interceptors.response.use(
     if (!axios.isAxiosError(error)) return Promise.reject(error)
     const config = error.config as InternalBigStockConfig | undefined
     if (!config || config.skipAuthRefresh || isBootstrap(config.url) ||
-        error.response?.status !== 401 || config._retry) {
+      error.response?.status !== 401 || config._retry) {
       return Promise.reject(error)
     }
     config._retry = true
