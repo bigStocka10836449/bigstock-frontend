@@ -16,6 +16,7 @@
         </RouterLink>
       </div>
       <button
+        ref="subscriptionToggle"
         type="button"
         class="quote-subscription-toggle"
         :aria-expanded="subscriptionsOpen"
@@ -25,7 +26,7 @@
         報價訂閱
       </button>
     </div>
-    <QuoteSubscriptionPanel :open="subscriptionsOpen" />
+    <QuoteSubscriptionPanel :open="subscriptionsOpen" @subscribed="closeSubscriptions" />
   </section>
 </template>
 
@@ -38,6 +39,7 @@
 
   const marketStore = useMarketStore()
   const subscriptionsOpen = ref(false)
+  const subscriptionToggle = ref<HTMLButtonElement | null>(null)
   const displayQuotes = computed(() => marketStore.webStockQuotes ?? DEFAULT_STOCKS.map(({ code, label }) => ({
     name: code,
     label,
@@ -47,6 +49,12 @@
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   })
+
+  function closeSubscriptions() {
+    if (!subscriptionsOpen.value) return
+    subscriptionsOpen.value = false
+    subscriptionToggle.value?.focus()
+  }
 
   function formatPrice(price: number | null | undefined): string {
     return price == null ? '—' : formatter.format(price)
@@ -94,10 +102,11 @@
 
   .quote-pill {
     display: flex;
-    flex: 1 0 146px;
+    box-sizing: border-box;
+    flex: 0 0 176px;
     align-items: center;
     gap: 10px;
-    min-height: 58px;
+    height: 62px;
     padding: 8px 12px;
     border: 1px solid #303942;
     border-radius: 999px;
@@ -128,8 +137,17 @@
 
   .quote-details {
     display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    flex: 1;
+    min-width: 0;
     gap: 2px;
     white-space: nowrap;
+  }
+
+  .quote-name,
+  .quote-price {
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 
   .quote-name {

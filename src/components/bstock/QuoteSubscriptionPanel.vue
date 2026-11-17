@@ -67,6 +67,7 @@ import {
 } from '@/api/webQuoteSubscriptionsApi'
 
 const props = defineProps<{ open: boolean }>()
+const emit = defineEmits<{ subscribed: [] }>()
 const marketStore = useMarketStore()
 const loaded = ref(false)
 const busy = ref(false)
@@ -161,6 +162,11 @@ function changeStock(stock: string, subscribed: boolean) {
       loaded.value = true
       if (result.visitorCreated) marketStore.retryMarketSocket()
       statusMessage.value = subscribed ? '已訂閱報價。' : '已取消訂閱。'
+      if (subscribed) {
+        stockInput.value = ''
+        selectedStockCode.value = ''
+        emit('subscribed')
+      }
     } catch (error) {
       if (isAxiosError(error) && error.response?.status === 404) {
         statusMessage.value = ''
@@ -177,14 +183,10 @@ function changeStock(stock: string, subscribed: boolean) {
   })
 }
 
-async function addSelectedStock() {
+function addSelectedStock() {
   const code = selectedStockCode.value
   if (!code || busy.value) return
-  await changeStock(code, true)
-  if (!errorMessage.value) {
-    stockInput.value = ''
-    selectedStockCode.value = ''
-  }
+  return changeStock(code, true)
 }
 
 function refreshList() {
