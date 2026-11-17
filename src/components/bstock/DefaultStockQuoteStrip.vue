@@ -1,27 +1,43 @@
 <template>
-  <section class="quote-strip" aria-label="個股報價">
-    <RouterLink
-      v-for="{ name: code, label, price } in displayQuotes"
-      :key="code"
-      :to="{ name: 'candlestick', query: { stockCode: code } }"
-      class="quote-pill"
-    >
-      <span class="quote-code">{{ code }}</span>
-      <span class="quote-details">
-        <span class="quote-name">{{ label }}</span>
-        <span class="quote-price">{{ formatPrice(price) }}</span>
-      </span>
-    </RouterLink>
+  <section class="quote-section" aria-label="個股報價">
+    <div class="quote-row">
+      <div class="quote-strip">
+        <RouterLink
+          v-for="{ name: code, label, price } in displayQuotes"
+          :key="code"
+          :to="{ name: 'candlestick', query: { stockCode: code } }"
+          class="quote-pill"
+        >
+          <span class="quote-code">{{ code }}</span>
+          <span class="quote-details">
+            <span class="quote-name">{{ label }}</span>
+            <span class="quote-price">{{ formatPrice(price) }}</span>
+          </span>
+        </RouterLink>
+      </div>
+      <button
+        type="button"
+        class="quote-subscription-toggle"
+        :aria-expanded="subscriptionsOpen"
+        aria-controls="quote-subscriptions"
+        @click="subscriptionsOpen = !subscriptionsOpen"
+      >
+        報價訂閱
+      </button>
+    </div>
+    <QuoteSubscriptionPanel :open="subscriptionsOpen" />
   </section>
 </template>
 
 <script setup lang="ts">
-  import { computed } from 'vue'
+  import { computed, ref } from 'vue'
   import { RouterLink } from 'vue-router'
+  import QuoteSubscriptionPanel from './QuoteSubscriptionPanel.vue'
   import { useMarketStore } from '@/stores/marketStore'
   import { DEFAULT_STOCKS } from '@/types/defaultStockQuotes'
 
   const marketStore = useMarketStore()
+  const subscriptionsOpen = ref(false)
   const displayQuotes = computed(() => marketStore.webStockQuotes ?? DEFAULT_STOCKS.map(({ code, label }) => ({
     name: code,
     label,
@@ -38,13 +54,42 @@
 </script>
 
 <style scoped>
-  .quote-strip {
-    display: flex;
-    gap: 12px;
+  .quote-section {
     max-width: 1200px;
     margin: 0 auto;
+  }
+
+  .quote-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .quote-strip {
+    display: flex;
+    flex: 1;
+    min-width: 0;
+    gap: 12px;
     padding: 2px 2px 6px;
     overflow-x: auto;
+  }
+
+  .quote-subscription-toggle {
+    flex: none;
+    padding: 8px 12px;
+    border: 1px solid #4a5d69;
+    border-radius: 7px;
+    background: #1b2229;
+    color: #f1f5f9;
+    font: inherit;
+    white-space: nowrap;
+    cursor: pointer;
+  }
+
+  .quote-subscription-toggle:hover,
+  .quote-subscription-toggle:focus-visible,
+  .quote-subscription-toggle[aria-expanded='true'] {
+    border-color: #65c995;
   }
 
   .quote-pill {
