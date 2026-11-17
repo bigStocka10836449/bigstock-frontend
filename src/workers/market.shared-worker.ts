@@ -4,10 +4,17 @@ import { MARKET_TOPICS, type MarketTopic } from '@/types/market'
 import { parseMarketMessage } from '@/services/marketParser'
 import {
   DEFAULT_STOCK_QUOTE_TOPIC,
+  DEFAULT_STOCKS,
   parseDefaultStockQuotes,
   type DefaultStockQuotes,
 } from '@/types/defaultStockQuotes'
-import type { PageToWorker, WorkerToPage, SharedMarketStatus } from '@/services/marketWorkerProtocol'
+import {
+  WEB_STOCK_QUOTE_TOPIC,
+  parseWebStockQuotes,
+  type WebStockQuote,
+  type WebStockQuoteUpdate,
+} from '@/types/webStockQuotes'
+import type { PageToWorker, WorkerToPage, SharedMarketStatus, QuoteFeed } from '@/services/marketWorkerProtocol'
 
 const scope = self as unknown as SharedWorkerGlobalScope
 const DEBUG = import.meta.env.DEV
@@ -26,10 +33,13 @@ let replaced = false
 let forceRefresh = false
 let nextRequestId = 0
 let defaultStockQuotes: DefaultStockQuotes | null = null
+let webStockQuotes: WebStockQuote[] | null = null
+const webSources = new Map<WebStockQuoteUpdate['source'], WebStockQuoteUpdate>()
+let restartRequested = false
 let pendingSession: {
   id: number
   requester: MessagePort
-  resolve: (defaultQuotesAvailable: boolean) => void
+  resolve: (quoteFeed: QuoteFeed) => void
   reject: (error: Error) => void
   timer: ReturnType<typeof setTimeout>
 } | null = null
@@ -55,11 +65,11 @@ function closeSubscriptions(): void {
   subscriptions = []
 }
 
-function askPageForSession(refresh: boolean): Promise<boolean> {
+function askPageForSession(refresh: boolean): Promise<QuoteFeed> {
   const requester = ports.keys().next().value as MessagePort | undefined
   if (!requester) return Promise.reject(new Error('No active BigStock page'))
   if (pendingSession) return Promise.reject(new Error('Session request already pending'))
-  return new Promise<boolean>((resolve, reject) => {
+  return new Promise<QuoteFeed>((resolve, reject) => {
     const id = ++nextRequestId
     const timer = setTimeout(() => {
       pendingSession = null
@@ -94,11 +104,13 @@ async function cleanup(current: Client, seq: number): Promise<void> {
   client = null
   stoppingClient = true
   closeSubscriptions()
+  clearWebQuotes()
   try { await current.deactivate() }
   catch (e) { if (DEBUG) console.warn('[SharedMarket] deactivate failed', e) }
   finally {
     stoppingClient = false
-    if (seq === generation) scheduleReconnect()
+    if (restartRequested) void restart()
+    else if (seq === generation) scheduleReconnect()
   }
 }
 async function connect(): Promise<void> {
@@ -107,7 +119,7 @@ async function connect(): Promise<void> {
   const seq = ++generation
   setStatus('connecting')
   try {
-    const defaultQuotesAvailable = await askPageForSession(forceRefresh)
+    const quoteFeed = await askPageForSession(forceRefresh)
     if (seq !== generation || ports.size === 0 || replaced) return
     forceRefresh = false
     const stomp = new Client({
@@ -125,7 +137,17 @@ async function connect(): Promise<void> {
           try { broadcast({ type: 'MARKET_EVENT', event: parseMarketMessage(topic, message.body) }) }
           catch (e) { console.error('[SharedMarket] parse failed', topic, e) }
         }))
-        if (defaultQuotesAvailable) {
+        if (quoteFeed === 'web') {
+          subscriptions.push(stomp.subscribe(WEB_STOCK_QUOTE_TOPIC, message => {
+            if (client !== stomp || seq !== generation) return
+            try {
+              const update = parseWebStockQuotes(message.body)
+              if (update) acceptWebQuotes(update)
+            } catch (e) {
+              if (DEBUG) console.warn('[SharedMarket] web stock quotes parse failed', e)
+            }
+          }))
+        } else if (quoteFeed === 'default') {
           subscriptions.push(stomp.subscribe(DEFAULT_STOCK_QUOTE_TOPIC, message => {
             if (client !== stomp || seq !== generation) return
             try {
@@ -171,15 +193,60 @@ async function connect(): Promise<void> {
     }
   } finally {
     initializing = false
-    if (seq === generation) scheduleReconnect()
+    if (restartRequested) void restart()
+    else if (seq === generation) scheduleReconnect()
   }
 }
+function acceptWebQuotes(update: WebStockQuoteUpdate): void {
+  const previous = webSources.get(update.source)
+  const sameCodes = previous?.stockCodes.join(',') === update.stockCodes.join(',')
+  if (!sameCodes || update.fetchedAt === null || previous?.fetchedAt == null ||
+      update.fetchedAt >= previous.fetchedAt) {
+    webSources.set(update.source, update)
+  }
+  const items = new Map<string, WebStockQuote>()
+  for (const source of ['emerging', 'tradingview'] as const) {
+    for (const quote of webSources.get(source)?.items ?? []) {
+      if (quote.price !== null || !items.has(quote.name)) items.set(quote.name, quote)
+    }
+  }
+  webStockQuotes = update.stockCodes.map(name => items.get(name) ??
+    { name, label: DEFAULT_STOCKS.find(stock => stock.code === name)?.label ?? name, price: null })
+  broadcast({ type: 'WEB_STOCK_QUOTES', quotes: webStockQuotes })
+  if (update.reconnectRequired) void restart(true)
+}
+
+function clearWebQuotes(): void {
+  webSources.clear()
+  if (!webStockQuotes) return
+  webStockQuotes = null
+  broadcast({ type: 'WEB_STOCK_QUOTES', quotes: null })
+}
+
+async function restart(refresh = false): Promise<void> {
+  if (refresh) forceRefresh = true
+  restartRequested = true
+  if (initializing || stoppingClient) return
+  restartRequested = false
+  replaced = false
+  attempts = 0
+  stoppingClient = true
+  try {
+    await stop()
+  } finally {
+    stoppingClient = false
+  }
+  restartRequested = false
+  if (ports.size > 0) void connect()
+}
+
 async function stop(): Promise<void> {
   clearReconnect()
   ++generation
   const current = client
   client = null
   closeSubscriptions()
+  clearWebQuotes()
   if (current) { try { await current.deactivate() } catch { /* closing */ } }
   setStatus('disconnected')
 }
@@ -202,6 +269,9 @@ function processMessage(port: MessagePort, message: PageToWorker): void {
       if (defaultStockQuotes) {
         port.postMessage({ type: 'DEFAULT_STOCK_QUOTES', quotes: defaultStockQuotes } satisfies WorkerToPage)
       }
+      if (webStockQuotes) {
+        port.postMessage({ type: 'WEB_STOCK_QUOTES', quotes: webStockQuotes } satisfies WorkerToPage)
+      }
       if (!replaced) void connect()
     }
     return
@@ -214,14 +284,11 @@ function processMessage(port: MessagePort, message: PageToWorker): void {
     clearTimeout(pending.timer)
     pendingSession = null
     if (message.error) pending.reject(new Error(message.error))
-    else pending.resolve(message.defaultQuotesAvailable === true)
+    else pending.resolve(message.quoteFeed)
     return
   }
   if (message.type === 'AUTH_CHANGED' || message.type === 'RETRY') {
-    replaced = false
-    forceRefresh = false
-    attempts = 0
-    void stop().then(() => { if (ports.size > 0) void connect() })
+    void restart()
   }
 }
 scope.onconnect = event => {

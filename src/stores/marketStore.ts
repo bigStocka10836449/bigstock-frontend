@@ -11,6 +11,7 @@ import {
   type LiveQuote,
 } from '@/utils/marketEventAdapter'
 import type { MarketEvent } from '@/types/market'
+import type { WebStockQuote } from '@/types/webStockQuotes'
 import type { DefaultStockQuotes } from '@/types/defaultStockQuotes'
 
 /** 六個市場維持既有商品代碼與顯示順序。 */
@@ -62,6 +63,7 @@ export const useMarketStore = defineStore('market', () => {
   const historyError = ref('')
   const socketStatus = ref<MarketSocketStatus>('disconnected')
   const defaultStockQuotes = ref<DefaultStockQuotes | null>(null)
+  const webStockQuotes = ref<WebStockQuote[] | null>(null)
   const selected = ref<MarketSymbol>('WTX00')
 
   const currentHistory = computed(() => histories.value[selected.value] ?? null)
@@ -204,6 +206,9 @@ export const useMarketStore = defineStore('market', () => {
         quotes => {
           if (generation === socketGeneration) defaultStockQuotes.value = quotes
         },
+        quotes => {
+          if (generation === socketGeneration) webStockQuotes.value = quotes
+        },
       )
     } catch (error) {
       console.error('[Market] SharedWorker 初始化失敗', error)
@@ -240,6 +245,7 @@ export const useMarketStore = defineStore('market', () => {
     historyError,
     socketStatus,
     defaultStockQuotes,
+    webStockQuotes,
     loadHistories,
     mountSocket,
     unmountSocket,

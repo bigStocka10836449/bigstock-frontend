@@ -1,7 +1,7 @@
 <template>
-  <section class="quote-strip" aria-label="熱門個股報價">
+  <section class="quote-strip" aria-label="個股報價">
     <RouterLink
-      v-for="{ code, label } in DEFAULT_STOCKS"
+      v-for="{ name: code, label, price } in displayQuotes"
       :key="code"
       :to="{ name: 'candlestick', query: { stockCode: code } }"
       class="quote-pill"
@@ -9,18 +9,24 @@
       <span class="quote-code">{{ code }}</span>
       <span class="quote-details">
         <span class="quote-name">{{ label }}</span>
-        <span class="quote-price">{{ formatPrice(marketStore.defaultStockQuotes?.prices[code]) }}</span>
+        <span class="quote-price">{{ formatPrice(price) }}</span>
       </span>
     </RouterLink>
   </section>
 </template>
 
 <script setup lang="ts">
+  import { computed } from 'vue'
   import { RouterLink } from 'vue-router'
   import { useMarketStore } from '@/stores/marketStore'
   import { DEFAULT_STOCKS } from '@/types/defaultStockQuotes'
 
   const marketStore = useMarketStore()
+  const displayQuotes = computed(() => marketStore.webStockQuotes ?? DEFAULT_STOCKS.map(({ code, label }) => ({
+    name: code,
+    label,
+    price: marketStore.defaultStockQuotes?.prices[code],
+  })))
   const formatter = new Intl.NumberFormat('zh-TW', {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,

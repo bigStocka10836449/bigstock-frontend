@@ -1,9 +1,10 @@
 import { authTokenManager } from '@/services/authTokenManager'
 import type { MarketEvent } from '@/types/market'
 import { DEFAULT_STOCK_QUOTE_TOPIC, type DefaultStockQuotes } from '@/types/defaultStockQuotes'
+import { WEB_STOCK_QUOTE_TOPIC, type WebStockQuote } from '@/types/webStockQuotes'
 import { ensureCsrfToken } from '@/services/csrfService'
 import apiClient from '@/router/bstockAxios'
-import type { PageToWorker, WorkerToPage, SharedMarketStatus } from '@/services/marketWorkerProtocol'
+import type { PageToWorker, WorkerToPage, SharedMarketStatus, QuoteFeed } from '@/services/marketWorkerProtocol'
 
 export interface MarketWorkerHandle {
   disconnect: () => void
@@ -14,6 +15,7 @@ export function connectMarketWorker(
   onData: (event: MarketEvent) => void,
   onStatus: (status: SharedMarketStatus) => void,
   onDefaultStockQuotes: (quotes: DefaultStockQuotes) => void,
+  onWebStockQuotes: (quotes: WebStockQuote[] | null) => void,
 ): MarketWorkerHandle {
   const worker = new SharedWorker(new URL('../workers/market.shared-worker.ts', import.meta.url), {
     type: 'module',
@@ -29,6 +31,7 @@ export function connectMarketWorker(
     const message = event.data as WorkerToPage
     if (message.type === 'MARKET_EVENT') onData(message.event)
     else if (message.type === 'DEFAULT_STOCK_QUOTES') onDefaultStockQuotes(message.quotes)
+    else if (message.type === 'WEB_STOCK_QUOTES') onWebStockQuotes(message.quotes)
     else if (message.type === 'STATUS') onStatus(message.status)
     else if (message.type === 'SESSION_REQUEST') {
       outstanding.add(message.requestId)
@@ -39,8 +42,8 @@ export function connectMarketWorker(
           else await authTokenManager.ensureSession()
         } catch (e) { error = e instanceof Error ? e.message : String(e) }
         if (!closed && outstanding.has(message.requestId)) {
-          const defaultQuotesAvailable = !error && await supportsDefaultStockQuotes()
-          send({ type: 'SESSION_RESPONSE', requestId: message.requestId, error, defaultQuotesAvailable })
+          const quoteFeed = error ? 'none' : await supportedQuoteFeed()
+          send({ type: 'SESSION_RESPONSE', requestId: message.requestId, error, quoteFeed })
         }
         outstanding.delete(message.requestId)
       })()
@@ -63,7 +66,17 @@ export function connectMarketWorker(
   }
 }
 
-async function supportsDefaultStockQuotes(): Promise<boolean> {
+async function supportedQuoteFeed(): Promise<QuoteFeed> {
+  try {
+    const { data } = await apiClient.get<{ destination?: string }>(
+      '/biz/marketQuotes/subscriptions/web',
+      { timeout: 2500, skipAuthRefresh: true },
+    )
+    if (data?.destination === WEB_STOCK_QUOTE_TOPIC) return 'web'
+  } catch {
+    // Older Biz versions can still provide the default quote topic.
+  }
+
   try {
     await ensureCsrfToken()
     const { data } = await apiClient.post<{ destination?: string }>(
@@ -71,9 +84,9 @@ async function supportsDefaultStockQuotes(): Promise<boolean> {
       {},
       { timeout: 2500, skipAuthRefresh: true },
     )
-    return data?.destination === DEFAULT_STOCK_QUOTE_TOPIC
+    return data?.destination === DEFAULT_STOCK_QUOTE_TOPIC ? 'default' : 'none'
   } catch {
     // An older Biz can reject the new topic and close the shared market connection.
-    return false
+    return 'none'
   }
 }

@@ -33,6 +33,8 @@
           </div>
         </div>
 
+        <StockWatchlistPanel :active-stock="loadedStockCode" @select-stock="handleSelectStock" />
+
         <!-- 個股查詢的六個主頁籤；每次只展示一種分析資料 -->
         <nav class="tab-section" aria-label="個股查詢頁籤">
           <button
@@ -102,6 +104,7 @@
   import FilterResults from '../components/bstock/FilterResults.vue'
   import StockFundamentals from '@/components/stock-components/StockFundamentals.vue'
   import Sidebar from '../components/bstock/Sidebar.vue'
+  import StockWatchlistPanel from '../components/bstock/StockWatchlistPanel.vue'
   import {
     getSingleStockPrice,
     getStockMarginShortInfo,
@@ -110,7 +113,7 @@
 
   export default {
     name: 'BstockCandlestick',
-    components: { Sidebar, FilterResults, Candlestick, StockInfoChart, StockFundamentals },
+    components: { Sidebar, FilterResults, Candlestick, StockInfoChart, StockFundamentals, StockWatchlistPanel },
     data() {
       return {
         filters: null, // 儲存篩選條件
