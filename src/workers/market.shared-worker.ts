@@ -2,6 +2,11 @@
 import { Client, type StompSubscription } from '@stomp/stompjs'
 import { MARKET_TOPICS, type MarketTopic } from '@/types/market'
 import { parseMarketMessage } from '@/services/marketParser'
+import {
+  DEFAULT_STOCK_QUOTE_TOPIC,
+  parseDefaultStockQuotes,
+  type DefaultStockQuotes,
+} from '@/types/defaultStockQuotes'
 import type { PageToWorker, WorkerToPage, SharedMarketStatus } from '@/services/marketWorkerProtocol'
 
 const scope = self as unknown as SharedWorkerGlobalScope
@@ -20,10 +25,11 @@ let stoppingClient = false
 let replaced = false
 let forceRefresh = false
 let nextRequestId = 0
+let defaultStockQuotes: DefaultStockQuotes | null = null
 let pendingSession: {
   id: number
   requester: MessagePort
-  resolve: () => void
+  resolve: (defaultQuotesAvailable: boolean) => void
   reject: (error: Error) => void
   timer: ReturnType<typeof setTimeout>
 } | null = null
@@ -49,11 +55,11 @@ function closeSubscriptions(): void {
   subscriptions = []
 }
 
-function askPageForSession(refresh: boolean): Promise<void> {
+function askPageForSession(refresh: boolean): Promise<boolean> {
   const requester = ports.keys().next().value as MessagePort | undefined
   if (!requester) return Promise.reject(new Error('No active BigStock page'))
   if (pendingSession) return Promise.reject(new Error('Session request already pending'))
-  return new Promise<void>((resolve, reject) => {
+  return new Promise<boolean>((resolve, reject) => {
     const id = ++nextRequestId
     const timer = setTimeout(() => {
       pendingSession = null
@@ -101,7 +107,7 @@ async function connect(): Promise<void> {
   const seq = ++generation
   setStatus('connecting')
   try {
-    await askPageForSession(forceRefresh)
+    const defaultQuotesAvailable = await askPageForSession(forceRefresh)
     if (seq !== generation || ports.size === 0 || replaced) return
     forceRefresh = false
     const stomp = new Client({
@@ -119,6 +125,19 @@ async function connect(): Promise<void> {
           try { broadcast({ type: 'MARKET_EVENT', event: parseMarketMessage(topic, message.body) }) }
           catch (e) { console.error('[SharedMarket] parse failed', topic, e) }
         }))
+        if (defaultQuotesAvailable) {
+          subscriptions.push(stomp.subscribe(DEFAULT_STOCK_QUOTE_TOPIC, message => {
+            if (client !== stomp || seq !== generation) return
+            try {
+              const quotes = parseDefaultStockQuotes(message.body)
+              if (!quotes || (defaultStockQuotes && quotes.fetchedAt < defaultStockQuotes.fetchedAt)) return
+              defaultStockQuotes = quotes
+              broadcast({ type: 'DEFAULT_STOCK_QUOTES', quotes })
+            } catch (e) {
+              if (DEBUG) console.warn('[SharedMarket] default stock quotes parse failed', e)
+            }
+          }))
+        }
       },
       onStompError: frame => {
         if (client !== stomp || seq !== generation) return
@@ -180,6 +199,9 @@ function processMessage(port: MessagePort, message: PageToWorker): void {
     if (message.type === 'HELLO') {
       port.postMessage({ type: 'WORKER_READY', clientCount: ports.size } satisfies WorkerToPage)
       port.postMessage({ type: 'STATUS', status } satisfies WorkerToPage)
+      if (defaultStockQuotes) {
+        port.postMessage({ type: 'DEFAULT_STOCK_QUOTES', quotes: defaultStockQuotes } satisfies WorkerToPage)
+      }
       if (!replaced) void connect()
     }
     return
@@ -192,7 +214,7 @@ function processMessage(port: MessagePort, message: PageToWorker): void {
     clearTimeout(pending.timer)
     pendingSession = null
     if (message.error) pending.reject(new Error(message.error))
-    else pending.resolve()
+    else pending.resolve(message.defaultQuotesAvailable === true)
     return
   }
   if (message.type === 'AUTH_CHANGED' || message.type === 'RETRY') {

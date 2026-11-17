@@ -1,5 +1,6 @@
 <template>
   <main class="home-page">
+    <DefaultStockQuoteStrip />
     <!-- ======================================================
          2. 最新財經快訊
          保留原本 newsStore，不新增 FCM Listener
@@ -74,6 +75,7 @@
 
   // 新增漲跌幅排行元件
   import StockChangeRanking from '@/components/bstock/StockChangeRanking.vue'
+  import DefaultStockQuoteStrip from '@/components/bstock/DefaultStockQuoteStrip.vue'
 
   // ============================================================
   // News Store

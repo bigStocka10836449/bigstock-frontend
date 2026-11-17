@@ -1,0 +1,94 @@
+<template>
+  <section class="quote-strip" aria-label="熱門個股報價">
+    <RouterLink
+      v-for="{ code, label } in DEFAULT_STOCKS"
+      :key="code"
+      :to="{ name: 'candlestick', query: { stockCode: code } }"
+      class="quote-pill"
+    >
+      <span class="quote-code">{{ code }}</span>
+      <span class="quote-details">
+        <span class="quote-name">{{ label }}</span>
+        <span class="quote-price">{{ formatPrice(marketStore.defaultStockQuotes?.prices[code]) }}</span>
+      </span>
+    </RouterLink>
+  </section>
+</template>
+
+<script setup lang="ts">
+  import { RouterLink } from 'vue-router'
+  import { useMarketStore } from '@/stores/marketStore'
+  import { DEFAULT_STOCKS } from '@/types/defaultStockQuotes'
+
+  const marketStore = useMarketStore()
+  const formatter = new Intl.NumberFormat('zh-TW', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })
+
+  function formatPrice(price: number | null | undefined): string {
+    return price == null ? '—' : formatter.format(price)
+  }
+</script>
+
+<style scoped>
+  .quote-strip {
+    display: flex;
+    gap: 12px;
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 2px 2px 6px;
+    overflow-x: auto;
+  }
+
+  .quote-pill {
+    display: flex;
+    flex: 1 0 146px;
+    align-items: center;
+    gap: 10px;
+    min-height: 58px;
+    padding: 8px 12px;
+    border: 1px solid #303942;
+    border-radius: 999px;
+    background: #1b2229;
+    color: #f1f5f9;
+    text-decoration: none;
+  }
+
+  .quote-pill:hover,
+  .quote-pill:focus-visible {
+    border-color: #65c995;
+    background: #212b33;
+  }
+
+  .quote-code {
+    display: grid;
+    place-items: center;
+    width: 43px;
+    height: 34px;
+    flex: none;
+    border-radius: 999px;
+    background: #24313b;
+    color: #91bfff;
+    font-size: 11px;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .quote-details {
+    display: grid;
+    gap: 2px;
+    white-space: nowrap;
+  }
+
+  .quote-name {
+    color: #c5cbd3;
+    font-size: 12px;
+  }
+
+  .quote-price {
+    font-size: 15px;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+  }
+</style>

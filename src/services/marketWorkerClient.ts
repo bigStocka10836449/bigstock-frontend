@@ -1,5 +1,8 @@
 import { authTokenManager } from '@/services/authTokenManager'
 import type { MarketEvent } from '@/types/market'
+import { DEFAULT_STOCK_QUOTE_TOPIC, type DefaultStockQuotes } from '@/types/defaultStockQuotes'
+import { ensureCsrfToken } from '@/services/csrfService'
+import apiClient from '@/router/bstockAxios'
 import type { PageToWorker, WorkerToPage, SharedMarketStatus } from '@/services/marketWorkerProtocol'
 
 export interface MarketWorkerHandle {
@@ -10,6 +13,7 @@ export interface MarketWorkerHandle {
 export function connectMarketWorker(
   onData: (event: MarketEvent) => void,
   onStatus: (status: SharedMarketStatus) => void,
+  onDefaultStockQuotes: (quotes: DefaultStockQuotes) => void,
 ): MarketWorkerHandle {
   const worker = new SharedWorker(new URL('../workers/market.shared-worker.ts', import.meta.url), {
     type: 'module',
@@ -24,6 +28,7 @@ export function connectMarketWorker(
     if (closed) return
     const message = event.data as WorkerToPage
     if (message.type === 'MARKET_EVENT') onData(message.event)
+    else if (message.type === 'DEFAULT_STOCK_QUOTES') onDefaultStockQuotes(message.quotes)
     else if (message.type === 'STATUS') onStatus(message.status)
     else if (message.type === 'SESSION_REQUEST') {
       outstanding.add(message.requestId)
@@ -34,7 +39,8 @@ export function connectMarketWorker(
           else await authTokenManager.ensureSession()
         } catch (e) { error = e instanceof Error ? e.message : String(e) }
         if (!closed && outstanding.has(message.requestId)) {
-          send({ type: 'SESSION_RESPONSE', requestId: message.requestId, error })
+          const defaultQuotesAvailable = !error && await supportsDefaultStockQuotes()
+          send({ type: 'SESSION_RESPONSE', requestId: message.requestId, error, defaultQuotesAvailable })
         }
         outstanding.delete(message.requestId)
       })()
@@ -54,5 +60,20 @@ export function connectMarketWorker(
       port.onmessage = null
       port.close()
     },
+  }
+}
+
+async function supportsDefaultStockQuotes(): Promise<boolean> {
+  try {
+    await ensureCsrfToken()
+    const { data } = await apiClient.post<{ destination?: string }>(
+      '/biz/marketQuotes/subscriptions',
+      {},
+      { timeout: 2500, skipAuthRefresh: true },
+    )
+    return data?.destination === DEFAULT_STOCK_QUOTE_TOPIC
+  } catch {
+    // An older Biz can reject the new topic and close the shared market connection.
+    return false
   }
 }
